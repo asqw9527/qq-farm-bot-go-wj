@@ -1,4 +1,4 @@
 package main
 
-var buildVersion = "0769a0f"
-var buildTime = "2026-10-10T00:07:38Z"
+var buildVersion = "7ca068a"
+var buildTime = "2026-10-10T23:48:55Z"

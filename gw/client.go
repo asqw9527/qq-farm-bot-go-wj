@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -37,25 +38,25 @@ type Config struct {
 
 // Client 网关客户端
 type Client struct {
-	cfg          Config
-	conn         *websocket.Conn
-	authToken    string
-	firstToken   string // 首次请求(登录)的 ACE 初始化凭据
-	seq          int64
-	mu           sync.Mutex
-	writeMu      sync.Mutex // 序列化 WebSocket 写：避免并发 goroutine（自动化 + 前端 HTTP handler + 心跳）同写一条连接导致帧交错损坏（nhooyr.io/websocket 不支持并发写）
-	pending      map[int64]chan *proto.Message
+	cfg        Config
+	conn       *websocket.Conn
+	authToken  string
+	firstToken string // 首次请求(登录)的 ACE 初始化凭据
+	seq        int64
+	mu         sync.Mutex
+	writeMu    sync.Mutex // 序列化 WebSocket 写：避免并发 goroutine（自动化 + 前端 HTTP handler + 心跳）同写一条连接导致帧交错损坏（nhooyr.io/websocket 不支持并发写）
+	pending    map[int64]chan *proto.Message
 	// 请求槽位机制：限制单连接并发在途请求数，避免 ACE 轮询占满网关
 	// 单槽位后游戏请求(AllLands/Bag)被饿死 → 后台“在线但无数据/卡死”。
-	normalSlots chan struct{} // 普通请求(非心跳)并发上限 = 8
-	totalSlots  chan struct{} // 全部请求(含心跳/ACE)并发上限 = 10
-	queued      atomic.Int64
-	active      atomic.Int64
-	kickHook          func() // 被踢（账号在别处登录等致命码）时由连接池注入：关闭连接并触发应用宝离线重连
-	timeoutCloseHook  func() // 超时断连（服务端抖动/瞬时限流）时由连接池注入：标记该断连为“超时型”，重连不计上限
-	disconnectHook    func(reason string) // 连接异常断开（读错误/心跳连续失败）时由连接池注入：写前端可见的掉线日志
-	accountID    string
-	giftHook     func(accountID string, delta int64)
+	normalSlots      chan struct{} // 普通请求(非心跳)并发上限 = 8
+	totalSlots       chan struct{} // 全部请求(含心跳/ACE)并发上限 = 10
+	queued           atomic.Int64
+	active           atomic.Int64
+	kickHook         func()              // 被踢（账号在别处登录等致命码）时由连接池注入：关闭连接并触发应用宝离线重连
+	timeoutCloseHook func()              // 超时断连（服务端抖动/瞬时限流）时由连接池注入：标记该断连为“超时型”，重连不计上限
+	disconnectHook   func(reason string) // 连接异常断开（读错误/心跳连续失败）时由连接池注入：写前端可见的掉线日志
+	accountID        string
+	giftHook         func(accountID string, delta int64)
 	// lastBagSync 最近一次从背包同步点券/金豆的时间（节流用，避免首页高并发拉 Bag 触发风控）
 	lastBagSync  time.Time
 	farmPushHook func(accountID string)
@@ -107,6 +108,14 @@ func gatewayToken() string {
 	return string(b) + "="
 }
 
+func buildGatewayURL(serverURL, platform, osName, ver, code string) (string, error) {
+	if serverURL == "" {
+		return "", fmt.Errorf("empty gateway url")
+	}
+	return fmt.Sprintf("%s?platform=%s&os=%s&ver=%s&code=%s&openID=",
+		serverURL, url.QueryEscape(platform), url.QueryEscape(osName), url.QueryEscape(ver), url.QueryEscape(code)), nil
+}
+
 func randInt(n int) int {
 	if n <= 0 {
 		return 0
@@ -128,10 +137,12 @@ func (c *Client) Connect(ctx context.Context, code string) error {
 	// getEncryptedInitInfo 生成“带用户”令牌供后续请求使用。故登录请求将走 c.authToken
 	// （随机），与 Node createGatewayToken() 行为逐字节一致；绑定后的 firstToken 仅用于登录后首请求(Prime)。
 
-	url := fmt.Sprintf("%s?platform=%s&os=%s&ver=%s&code=%s&openID=",
-		c.cfg.ServerURL, c.cfg.Platform, c.cfg.OS, c.cfg.ClientVersion, code)
+	wsURL, err := buildGatewayURL(c.cfg.ServerURL, c.cfg.Platform, c.cfg.OS, c.cfg.ClientVersion, code)
+	if err != nil {
+		return fmt.Errorf("ws url: %w", err)
+	}
 
-	conn, _, err := websocket.Dial(ctx, url, &websocket.DialOptions{
+	conn, _, err := websocket.Dial(ctx, wsURL, &websocket.DialOptions{
 		HTTPHeader: http.Header{
 			"User-Agent": []string{defaultUserAgent},
 			"Origin":     []string{"https://gate-obt.nqf.qq.com"},

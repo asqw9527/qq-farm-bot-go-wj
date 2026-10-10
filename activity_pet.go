@@ -15,18 +15,20 @@ import (
 // S3「萌宠成长日记」（比熊）活动协议层。
 //
 // 参考 protobuf（gamepb.activitypb）：
-//   ActivityService.GetGroup(group_id=2026090100)
-//     → GetGroupReply{ group=1: PetDiaryActivityGroup{ head=1, children=2[] } }
-//       每个 children = PetDiaryActivityData{ head=1, shop=102, mega_event=110, pet_treasure_hunt=115 }
-//   ActivityService.Operate{ activity_id=1, operate_type=2, <selector> }
-//     operate_type 取值与参考实现的 OPERATIONS 一致（来自小程序 1.14.0.1 编码器）：
-//       27 领养(finish_cg) / 29 投喂 / 30 寻宝 / 31 互动记录 / 32 领手记{order} /
-//       41 刷锦囊 / 42 装锦囊 / 43 夺宝 / 44 被夺记录 / 45 开宝藏 / 46 被夺补偿 /
-//       47 好友活动信息{friend_gid} / 48 领永久比熊 / 49 手记已读 / 50 跳过战斗CG
-//     子活动：21 一键领种子礼包(id=2026090102) / 1 商店兑换(id=2026090103)
+//
+//	ActivityService.GetGroup(group_id=2026090100)
+//	  → GetGroupReply{ group=1: PetDiaryActivityGroup{ head=1, children=2[] } }
+//	    每个 children = PetDiaryActivityData{ head=1, shop=102, mega_event=110, pet_treasure_hunt=115 }
+//	ActivityService.Operate{ activity_id=1, operate_type=2, <selector> }
+//	  operate_type 取值与参考实现的 OPERATIONS 一致（来自小程序 1.14.0.1 编码器）：
+//	    27 领养(finish_cg) / 29 投喂 / 30 寻宝 / 31 互动记录 / 32 领手记{order} /
+//	    41 刷锦囊 / 42 装锦囊 / 43 夺宝 / 44 被夺记录 / 45 开宝藏 / 46 被夺补偿 /
+//	    47 好友活动信息{friend_gid} / 48 领永久比熊 / 49 手记已读 / 50 跳过战斗CG
+//	  子活动：21 一键领种子礼包(id=2026090102) / 1 商店兑换(id=2026090103)
 //
 // 活动参数（CDN config/ActivityPetTreasureHuntBase，2026-09-10 线上实测）：
-//   feed_items=1028:700 / growth_per_feed=700 / growth_adult_threshold=7000 / daily_feed_limit=16
+//
+//	feed_items=1028:700 / growth_per_feed=700 / growth_adult_threshold=7000 / daily_feed_limit=16
 const (
 	petGroupID int64 = 2026090100
 	petPetID   int64 = 2026090101
@@ -239,16 +241,22 @@ func petBuildState(ctx context.Context, accountID string, body []byte) *PetState
 	growthAdult := nur.Growth >= petAdultGrowth
 	nur.Adult = growthAdult || (nur.Stage == 2 && nur.Growth > 0)
 
-	bag := petReadItems(ctx, accountID, petFeedItemID, petStarItemID)
-	cake := bag[petFeedItemID]
-	if n := petScanItemCount(petRaw, petFeedItemID); n > cake {
-		cake = n
+	cake := petScanItemCount(petRaw, petFeedItemID)
+	star := petScanItemCount(petRaw, petStarItemID)
+	if cake == 0 || star == 0 {
+		bag := petReadItems(ctx, accountID, petFeedItemID, petStarItemID)
+		if bag[petFeedItemID] > cake {
+			cake = bag[petFeedItemID]
+		}
+		if bag[petStarItemID] > star {
+			star = bag[petStarItemID]
+		}
 	}
 	nur.CakeHave = cake
 	nur.CanFeed = cake >= petFeedCost
 
 	st.Cake = cake
-	st.Star = bag[petStarItemID]
+	st.Star = star
 	st.Nurture = nur
 	st.Hunt = petParseHunt(huntFs)
 	st.Hunt.CanDraw = st.Active && nur.Adult && st.Hunt.CanDraw && st.Cake >= petFeedCost
@@ -400,7 +408,8 @@ func handleActivityPet(w http.ResponseWriter, r *http.Request) {
 
 // POST /api/activity/pet/operate  body: {accountId, action, order?}
 // action: initialize(领养) / feed(投喂) / draw(寻宝) / claimDog(领永久比熊) /
-//         story(领手记, 需 order) / seeds(一键领种子礼包) / exchange(商店兑换, 需 goodsId/count)
+//
+//	story(领手记, 需 order) / seeds(一键领种子礼包) / exchange(商店兑换, 需 goodsId/count)
 func handleActivityPetOperate(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		AccountID string `json:"accountId"`
@@ -413,7 +422,14 @@ func handleActivityPetOperate(w http.ResponseWriter, r *http.Request) {
 		writeJSONMap(w, "ok", false, "error", "参数解析失败")
 		return
 	}
-	accountID := resolveAccountIDWithOwner(r, req.AccountID)
+	bodyID := req.AccountID
+	if bodyID == "" {
+		bodyID = r.URL.Query().Get("accountId")
+	}
+	if bodyID == "" {
+		bodyID = r.Header.Get("x-account-id")
+	}
+	accountID := resolveAccountIDWithOwner(r, bodyID)
 	if accountID == "" {
 		writeJSONMap(w, "ok", false, "error", "缺少 accountId")
 		return

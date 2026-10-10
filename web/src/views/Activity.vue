@@ -777,7 +777,7 @@ async function loadPet() {
   const a = acc(); if (!a) return
   petState.err = ''
   try {
-    const { data } = await api.get('/api/activity/pet', { params: { accountId: a.gid } })
+    const { data } = await api.get('/api/activity/pet', { params: { accountId: a } })
     if (data && data.ok) petState.data = data.data
     else petState.err = (data && data.error) || '加载失败'
   } catch (e) { petState.err = '加载失败' }
@@ -786,7 +786,7 @@ async function petOperate(action, payload) {
   const a = acc(); if (!a || petBusy.value) return
   petBusy.value = true
   try {
-    const { data } = await api.post('/api/activity/pet/operate', Object.assign({ accountId: a.gid, action }, payload || {}))
+    const { data } = await api.post('/api/activity/pet/operate', Object.assign({ accountId: a, action }, payload || {}))
     if (data && data.ok) {
       const msg = { feed: '投喂成功：成长 +700 · 幸运星 +100', draw: '寻宝完成', initialize: '领养成功', claimDog: '已获得永久比熊', story: '手记奖励已领取', seeds: '种子礼包已领取', exchange: '兑换成功' }[action] || '操作成功'
       app.success(msg)
