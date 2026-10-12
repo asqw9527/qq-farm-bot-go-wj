@@ -661,25 +661,44 @@ func hasGoldenBug(p *proto.PlantInfo) bool {
 	return false
 }
 
-// farmGridCols 农场网格列数（CSS 注释：24块地）
-const farmGridCols = 4
+// farmGridCols 游戏农场列数（经典 24 块 = 6×4）。网页 .land 四列只是卡片排版。
+const farmGridCols = 6
 
-// inferEmpty2x2IDs 以 lid 为左上角，推断相邻四块空地组成一个 2x2 种植单元。
-// 当 LandSize==1 但旁边有空地时，游戏会在种植时自动合并为 2x2。
-// 只检查四连块是否全部空且 MasterLandID==0。4 列网格任意行均可成组。
+func farmGridRows(landByID map[int64]*proto.LandInfo) int {
+	maxID := int64(0)
+	for id := range landByID {
+		if id > maxID {
+			maxID = id
+		}
+	}
+	if maxID <= 0 {
+		return 4
+	}
+	rows := int((maxID + int64(farmGridCols) - 1) / int64(farmGridCols))
+	if rows < 2 {
+		return 2
+	}
+	return rows
+}
+
+// inferEmpty2x2IDs 以 lid 为左上角，按 6 列网格取右/下/右下四块空地。
+// 末列、末行不能当左上角；四块都必须已解锁、非从属、无活株。
 func inferEmpty2x2IDs(lid int64, landByID map[int64]*proto.LandInfo) []int64 {
 	if lid <= 0 {
 		return nil
 	}
-	col := int((lid - 1) % farmGridCols)
-	if col >= farmGridCols-1 {
+	cols := farmGridCols
+	rows := farmGridRows(landByID)
+	col := int((lid - 1) % int64(cols))
+	row := int((lid - 1) / int64(cols))
+	if col >= cols-1 || row >= rows-1 {
 		return nil
 	}
 	candidates := []int64{
 		lid,
 		lid + 1,
-		lid + farmGridCols,
-		lid + farmGridCols + 1,
+		lid + int64(cols),
+		lid + int64(cols) + 1,
 	}
 	var ids []int64
 	for _, c := range candidates {
@@ -858,7 +877,7 @@ func autoPlantLands(accountID string, c *gw.Client, cfg config.AccountConfig, la
 					continue
 				}
 				plantErr := execFarmOp(c, "Plant", proto.EncodePlantRequest(realSeed, master))
-				if plantErr != nil && len(ids) > 1 {
+				if plantErr != nil && len(ids) > 1 && !strings.Contains(plantErr.Error(), "1001052") {
 					plantErr = execFarmOp(c, "Plant", proto.EncodePlantRequest(realSeed, ids))
 				}
 				if plantErr == nil {
@@ -1667,7 +1686,7 @@ func runFertilizerByConfig(accountID string, c *gw.Client, cfg config.AccountCon
 	now := time.Now().Unix()
 	smartSeconds := cfg.Automation.FertilizerSmartSeconds
 	if smartSeconds <= 0 {
-		smartSeconds = 3600 // 
+		smartSeconds = 3600 //
 	}
 
 	// 按土地类型过滤（从属地块随 master 处理：仅对非 slave 地块施肥）
@@ -1784,7 +1803,7 @@ func getFastMatureLands(lands []*proto.LandInfo, thresholdSec, now int64) []int6
 	return out
 }
 
-// getOrganicFertilizerTargetsFromLands 
+// getOrganicFertilizerTargetsFromLands
 // 仅挑选"还能再施有机肥"的地块（left_inorc_fert_times > 0）。HasLeftInorcFertTimes=false 时
 // 视为服务端未下发该字段，按 Node Object.hasOwn 语义包含（不跳过）。
 func getOrganicFertilizerTargetsFromLands(lands []*proto.LandInfo) []int64 {

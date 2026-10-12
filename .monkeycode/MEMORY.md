@@ -33,4 +33,4 @@ This file records user instructions, preferences, and teachings for reference in
 - Category: Troubleshooting & Debugging
 - Instructions:
   - 月下美人：种子 21404，plant 1021404，fruit 41404，asset Crop_1404；Plant.size=null 导致展示图缺失，需 game_images.go 路径编码 + itemNameAliases 绕过 JSON 优先级
-  - 背包优先 2x2 合种：1x1 空地通过 farmGridCols=4 推断相邻四连块（inferEmpty2x2IDs）；plantFromShopLands/plantBagSeedsForLands 需用 reservedLandSet() 过滤已预留地块
+  - 背包优先 2x2 合种：游戏网格 6×4（farmGridCols=6），网页四列只是卡片排版；inferEmpty2x2IDs 按左上角取右/下/右下，末列末行不能成组。错误组 [19 20 23 24] 是 4 列误推，服务端 code=1001052。plantFromShopLands/plantBagSeedsForLands 需用 reservedLandSet() 过滤已预留地块
