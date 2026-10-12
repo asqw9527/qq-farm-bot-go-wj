@@ -543,7 +543,37 @@ func runFarmOnce(accountID string, c *gw.Client, cfg config.AccountConfig) {
 		}
 	}
 
-	// 3. 种植（枯死 + 空地）
+	// 3. 解锁 + 升级（空金土地升紫必须在种植之前，否则新作物会占住地块）
+	if cfg.Automation.LandUpgrade {
+		landChanged := false
+		for _, id := range a.couldUnlock {
+			if err := execFarmOp(c, "UnlockLand", proto.EncodeUnlockLandRequest(id, false)); err == nil {
+				landChanged = true
+				appendOpLog(accountID, "farm", fmt.Sprintf("解锁土地 %d", id))
+			} else {
+				appendOpLog(accountID, "farm", fmt.Sprintf("解锁土地 %d 失败: %v", id, err))
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+		for _, id := range a.couldUpgrade {
+			if err := execFarmOp(c, "UpgradeLand", proto.EncodeUpgradeLandRequest(id)); err == nil {
+				landChanged = true
+				recordOperation(accountID, "upgrade", 1)
+				appendOpLog(accountID, "farm", fmt.Sprintf("升级土地 %d", id))
+			} else {
+				appendOpLog(accountID, "farm", fmt.Sprintf("升级土地 %d 失败: %v", id, err))
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+		if landChanged {
+			if rep3, e3 := c.Request(ctx, plantService, "AllLands", proto.EncodeAllLandsRequest(0), 15*time.Second); e3 == nil {
+				lands = proto.DecodeAllLandsReply(rep3.Body).Lands
+				a = analyzeFarmLands(lands, time.Now().Unix())
+			}
+		}
+	}
+
+	// 4. 种植（枯死 + 空地）
 	plantTargets := append([]int64{}, a.dead...)
 	plantTargets = append(plantTargets, a.empty...)
 	plantTargets = dedupeInt64(plantTargets)
@@ -552,26 +582,9 @@ func runFarmOnce(accountID string, c *gw.Client, cfg config.AccountConfig) {
 		time.Sleep(300 * time.Millisecond)
 	}
 
-	// 4. 多季补肥，reason=multi_season
+	// 5. 多季补肥，reason=multi_season
 	if cfg.Automation.FertilizerMultiSeason && cfg.Automation.Fertilizer != "final_normal" && len(a.growing) > 0 {
 		runFertilizerByConfig(accountID, c, cfg, a.growing, "multi_season", false)
-	}
-
-	// 5. 解锁 + 升级
-	if cfg.Automation.LandUpgrade {
-		for _, id := range a.couldUnlock {
-			if err := execFarmOp(c, "UnlockLand", proto.EncodeUnlockLandRequest(id, false)); err == nil {
-				appendOpLog(accountID, "farm", fmt.Sprintf("解锁土地 %d", id))
-			}
-			time.Sleep(200 * time.Millisecond)
-		}
-		for _, id := range a.couldUpgrade {
-			if err := execFarmOp(c, "UpgradeLand", proto.EncodeUpgradeLandRequest(id)); err == nil {
-				recordOperation(accountID, "upgrade", 1)
-				appendOpLog(accountID, "farm", fmt.Sprintf("升级土地 %d", id))
-			}
-			time.Sleep(200 * time.Millisecond)
-		}
 	}
 
 	// 6. 智能施肥（farm 循环内，runFertilizerByConfig([], {skipNormal:true})）
@@ -610,6 +623,9 @@ func analyzeFarmLands(lands []*proto.LandInfo, now int64) farmAnalysis {
 		// 从属土地（2x2 的 slave）由 master 统一处理，跳过单独操作
 		if l.MasterLandID > 0 {
 			continue
+		}
+		if l.CouldUpgrade {
+			a.couldUpgrade = append(a.couldUpgrade, l.ID)
 		}
 		if l.Plant == nil || len(l.Plant.Phases) == 0 {
 			a.empty = append(a.empty, l.ID)
@@ -858,7 +874,6 @@ func autoPlantLands(accountID string, c *gw.Client, cfg config.AccountConfig, la
 			if len(ids) == 0 {
 				return false
 			}
-			master := []int64{ids[0]}
 			for i := range usable {
 				s := &usable[i]
 				if s.count <= 0 {
@@ -876,9 +891,14 @@ func autoPlantLands(accountID string, c *gw.Client, cfg config.AccountConfig, la
 					appendOpLog(accountID, "farm", fmt.Sprintf("2x2 种子未就绪 seed=%d: %v", s.seedID, e2))
 					continue
 				}
-				plantErr := execFarmOp(c, "Plant", proto.EncodePlantRequest(realSeed, master))
-				if plantErr != nil && len(ids) > 1 && !strings.Contains(plantErr.Error(), "1001052") {
-					plantErr = execFarmOp(c, "Plant", proto.EncodePlantRequest(realSeed, ids))
+				// 2x2 种植协议兼容：
+				// 若为已合种地块或服务端要求主地，单主地与全四格均可能被支持。
+				// 首选传递推断/完整的 ids；若失败且地块数量大于1，降级尝试仅 master
+				plantErr := execFarmOp(c, "Plant", proto.EncodePlantRequest(realSeed, ids))
+				if plantErr != nil && len(ids) > 1 {
+					if err2 := execFarmOp(c, "Plant", proto.EncodePlantRequest(realSeed, []int64{ids[0]})); err2 == nil {
+						plantErr = nil
+					}
 				}
 				if plantErr == nil {
 					s.count--

@@ -45,3 +45,22 @@ func TestInferEmpty2x2RejectsFourColGroup(t *testing.T) {
 		t.Fatalf("4-col group [19 20 23 24] must not be inferred, got %v", got)
 	}
 }
+
+func TestAnalyzeFarmLandsCollectsGoldUpgrade(t *testing.T) {
+	lands := []*proto.LandInfo{
+		{ID: 1, Unlocked: true, Level: 4, CouldUpgrade: true},
+		{ID: 2, Unlocked: true, Level: 5, CouldUpgrade: false},
+		{ID: 3, Unlocked: false, CouldUnlock: true, CouldUpgrade: false},
+		{ID: 4, Unlocked: true, Level: 4, CouldUpgrade: true, MasterLandID: 1},
+	}
+	a := analyzeFarmLands(lands, 0)
+	if !reflect.DeepEqual(a.couldUpgrade, []int64{1}) {
+		t.Fatalf("couldUpgrade=%v want [1]", a.couldUpgrade)
+	}
+	if !reflect.DeepEqual(a.couldUnlock, []int64{3}) {
+		t.Fatalf("couldUnlock=%v want [3]", a.couldUnlock)
+	}
+	if !reflect.DeepEqual(a.empty, []int64{1, 2}) {
+		t.Fatalf("empty=%v want [1 2]", a.empty)
+	}
+}
