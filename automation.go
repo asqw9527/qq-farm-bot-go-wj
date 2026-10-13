@@ -624,16 +624,19 @@ func analyzeFarmLands(lands []*proto.LandInfo, now int64) farmAnalysis {
 		if l.MasterLandID > 0 {
 			continue
 		}
-		if l.CouldUpgrade {
-			a.couldUpgrade = append(a.couldUpgrade, l.ID)
-		}
 		if l.Plant == nil || len(l.Plant.Phases) == 0 {
 			a.empty = append(a.empty, l.ID)
+			if l.CouldUpgrade {
+				a.couldUpgrade = append(a.couldUpgrade, l.ID)
+			}
 			continue
 		}
 		ph := currentPhase(l.Plant.Phases, now)
 		if ph == nil {
 			a.empty = append(a.empty, l.ID)
+			if l.CouldUpgrade {
+				a.couldUpgrade = append(a.couldUpgrade, l.ID)
+			}
 			continue
 		}
 		switch ph.Phase {
@@ -677,8 +680,12 @@ func hasGoldenBug(p *proto.PlantInfo) bool {
 	return false
 }
 
-// farmGridCols 游戏农场列数（经典 24 块 = 6×4）。网页 .land 四列只是卡片排版。
-const farmGridCols = 6
+const farmGridCols = 4
+
+type land2x2Group struct {
+	master int64
+	ids    []int64
+}
 
 func farmGridRows(landByID map[int64]*proto.LandInfo) int {
 	maxID := int64(0)
@@ -688,7 +695,7 @@ func farmGridRows(landByID map[int64]*proto.LandInfo) int {
 		}
 	}
 	if maxID <= 0 {
-		return 4
+		return 6
 	}
 	rows := int((maxID + int64(farmGridCols) - 1) / int64(farmGridCols))
 	if rows < 2 {
@@ -697,40 +704,113 @@ func farmGridRows(landByID map[int64]*proto.LandInfo) int {
 	return rows
 }
 
-// inferEmpty2x2IDs 以 lid 为左上角，按 6 列网格取右/下/右下四块空地。
-// 末列、末行不能当左上角；四块都必须已解锁、非从属、无活株。
+func landHasLivePlant(l *proto.LandInfo) bool {
+	if l == nil || l.Plant == nil || len(l.Plant.Phases) == 0 {
+		return false
+	}
+	ph := currentPhase(l.Plant.Phases, time.Now().Unix())
+	return ph != nil && ph.Phase != proto.PhaseDead
+}
+
+func build2x2LandGroups(landByID map[int64]*proto.LandInfo) []land2x2Group {
+	rows := farmGridRows(landByID)
+	var groups []land2x2Group
+	for bottomRow := 1; bottomRow < rows; bottomRow++ {
+		for column := 0; column < farmGridCols-1; column++ {
+			master := int64(bottomRow*farmGridCols + column + 1)
+			ids := []int64{
+				master,
+				master + 1,
+				master - int64(farmGridCols),
+				master - int64(farmGridCols) + 1,
+			}
+			ok := true
+			for _, id := range ids {
+				l := landByID[id]
+				if l == nil || !l.Unlocked || l.MasterLandID > 0 {
+					ok = false
+					break
+				}
+			}
+			if ok {
+				groups = append(groups, land2x2Group{master: master, ids: ids})
+			}
+		}
+	}
+	return groups
+}
+
 func inferEmpty2x2IDs(lid int64, landByID map[int64]*proto.LandInfo) []int64 {
 	if lid <= 0 {
 		return nil
 	}
-	cols := farmGridCols
-	rows := farmGridRows(landByID)
-	col := int((lid - 1) % int64(cols))
-	row := int((lid - 1) / int64(cols))
-	if col >= cols-1 || row >= rows-1 {
+	col := int((lid - 1) % int64(farmGridCols))
+	row := int((lid - 1) / int64(farmGridCols))
+	if col >= farmGridCols-1 || row < 1 {
 		return nil
 	}
-	candidates := []int64{
+	ids := []int64{
 		lid,
 		lid + 1,
-		lid + int64(cols),
-		lid + int64(cols) + 1,
+		lid - int64(farmGridCols),
+		lid - int64(farmGridCols) + 1,
 	}
-	var ids []int64
-	for _, c := range candidates {
-		l := landByID[c]
+	for _, id := range ids {
+		l := landByID[id]
 		if l == nil || !l.Unlocked || l.MasterLandID > 0 {
 			return nil
 		}
-		if l.Plant != nil && len(l.Plant.Phases) > 0 {
-			ph := currentPhase(l.Plant.Phases, time.Now().Unix())
-			if ph != nil && ph.Phase != proto.PhaseDead {
-				return nil
-			}
+		if landHasLivePlant(l) {
+			return nil
 		}
-		ids = append(ids, c)
 	}
 	return ids
+}
+
+func selectReady2x2Groups(groups []land2x2Group, landByID map[int64]*proto.LandInfo, seen map[int64]bool) (ready, waiting []land2x2Group) {
+	occupied := map[int64]bool{}
+	for id, v := range seen {
+		if v {
+			occupied[id] = true
+		}
+	}
+	for _, g := range groups {
+		blocked := false
+		for _, id := range g.ids {
+			if occupied[id] {
+				blocked = true
+				break
+			}
+		}
+		if blocked {
+			continue
+		}
+		empty := 0
+		valid := true
+		for _, id := range g.ids {
+			l := landByID[id]
+			if l == nil || !l.Unlocked || l.MasterLandID > 0 {
+				valid = false
+				break
+			}
+			if landHasLivePlant(l) {
+				continue
+			}
+			empty++
+		}
+		if !valid {
+			continue
+		}
+		if empty == 4 {
+			ready = append(ready, g)
+			for _, id := range g.ids {
+				occupied[id] = true
+			}
+			continue
+		}
+		waiting = append(waiting, g)
+	}
+	return ready, waiting
 }
 
 // reservedLandSet 返回已预留 2x2 单元的所有土地 ID 集合。
@@ -767,14 +847,6 @@ func dedupeInt64(in []int64) []int64 {
 //  1. 枯死先铲除；2) 2x2 优先（用背包四格种子预留并种植）；
 //  3. bag_priority 按背包种子顺序消耗（并按地块品质拆分）其余/剩余走第二优先策略；
 //  4. 其余策略走商城购买种植。
-func landHasLivePlant(l *proto.LandInfo) bool {
-	if l == nil || l.Plant == nil || len(l.Plant.Phases) == 0 {
-		return false
-	}
-	ph := currentPhase(l.Plant.Phases, time.Now().Unix())
-	return ph != nil && ph.Phase != proto.PhaseDead
-}
-
 func autoPlantLands(accountID string, c *gw.Client, cfg config.AccountConfig, lands []*proto.LandInfo, targetLandIDs []int64) {
 	landByID := map[int64]*proto.LandInfo{}
 	for _, l := range lands {
@@ -802,7 +874,6 @@ func autoPlantLands(accountID string, c *gw.Client, cfg config.AccountConfig, la
 			time.Sleep(200 * time.Millisecond)
 		}
 	}
-	// 构建种植单元：master + 从属地（2x2）仅保留未处理过的 master
 	type unit struct {
 		master int64
 		ids    []int64
@@ -818,25 +889,83 @@ func autoPlantLands(accountID string, c *gw.Client, cfg config.AccountConfig, la
 		if l == nil {
 			continue
 		}
-		u := unit{master: id, ids: []int64{id}}
 		if l.LandSize > 1 && len(l.SlaveLandIDs) > 0 {
-			u.ids = append(u.ids, l.SlaveLandIDs...)
-			for _, s := range l.SlaveLandIDs {
+			ids := append([]int64{id}, l.SlaveLandIDs...)
+			for _, s := range ids {
 				seen[s] = true
 			}
-			u.is2x2 = true
-		} else if cfg.Prioritize2x2Crops {
-			if ids := inferEmpty2x2IDs(id, landByID); ids != nil {
-				u.ids = ids
-				u.master = ids[0]
-				for _, s := range ids {
-					seen[s] = true
+			units = append(units, unit{master: id, ids: ids, is2x2: true})
+		}
+	}
+
+	var usable2x2 []bagSeedItem
+	if cfg.Prioritize2x2Crops {
+		seeds, seedsErr := listBagSeeds(accountID, c, cfg, 2)
+		if seedsErr != nil {
+			appendOpLog(accountID, "farm", "2x2 背包读取失败: "+seedsErr.Error())
+		}
+		userLevel := int(c.Level())
+		for _, s := range seeds {
+			if s.count <= 0 || s.seedID <= 0 {
+				continue
+			}
+			if s.reqLvl > 0 && s.reqLvl > userLevel {
+				appendOpLog(accountID, "farm", fmt.Sprintf("2x2 跳过未解锁种子 %s(lv%d)", seedPlantName(s.seedID), s.reqLvl))
+				continue
+			}
+			usable2x2 = append(usable2x2, s)
+		}
+		if len(usable2x2) == 0 {
+			appendOpLog(accountID, "farm", "2x2 优先开启但背包无可用四格种子")
+		} else {
+			names := make([]string, 0, len(usable2x2))
+			for _, s := range usable2x2 {
+				names = append(names, fmt.Sprintf("%s×%d", seedPlantName(s.seedID), s.count))
+			}
+			appendOpLog(accountID, "farm", "2x2 背包种子: "+strings.Join(names, "、"))
+			ready, waiting := selectReady2x2Groups(build2x2LandGroups(landByID), landByID, seen)
+			for _, g := range ready {
+				for _, id := range g.ids {
+					seen[id] = true
 				}
-				u.is2x2 = true
+				units = append(units, unit{master: g.master, ids: g.ids, is2x2: true})
+			}
+			for _, g := range waiting {
+				overlap := false
+				for _, id := range g.ids {
+					if seen[id] {
+						overlap = true
+						break
+					}
+				}
+				if overlap {
+					continue
+				}
+				groupKey := fmt.Sprintf("2x2:%d", g.master)
+				reserved2x2Mu.Lock()
+				reserved2x2[groupKey] = g.ids
+				reserved2x2Mu.Unlock()
+				for _, id := range g.ids {
+					seen[id] = true
+				}
+				if last2x2WaitKey != groupKey {
+					appendOpLog(accountID, "farm", fmt.Sprintf("2x2预留 等待地块%v", g.ids))
+					last2x2WaitKey = groupKey
+				}
+				break
 			}
 		}
+	}
+	for _, id := range targetLandIDs {
+		if seen[id] {
+			continue
+		}
+		l := landByID[id]
+		if l == nil {
+			continue
+		}
 		seen[id] = true
-		units = append(units, u)
+		units = append(units, unit{master: id, ids: []int64{id}})
 	}
 	if len(units) == 0 {
 		return
@@ -847,35 +976,14 @@ func autoPlantLands(accountID string, c *gw.Client, cfg config.AccountConfig, la
 		strategy = "level"
 	}
 
-	// 2x2 优先：背包四格种子预留 + 等待四格清空
-	if cfg.Prioritize2x2Crops {
+	if cfg.Prioritize2x2Crops && len(usable2x2) > 0 {
 		var remainUnits []unit
-		seeds, seedsErr := listBagSeeds(accountID, c, cfg, 2)
-		if seedsErr != nil {
-			appendOpLog(accountID, "farm", "2x2 背包读取失败: "+seedsErr.Error())
-			seeds = nil
-		}
-		var usable []bagSeedItem
-		for _, s := range seeds {
-			if s.count > 0 && s.seedID > 0 {
-				usable = append(usable, s)
-			}
-		}
-		if len(usable) == 0 {
-			appendOpLog(accountID, "farm", "2x2 优先开启但背包无四格种子")
-		} else {
-			names := make([]string, 0, len(usable))
-			for _, s := range usable {
-				names = append(names, fmt.Sprintf("%s×%d", seedPlantName(s.seedID), s.count))
-			}
-			appendOpLog(accountID, "farm", "2x2 背包种子: "+strings.Join(names, "、"))
-		}
 		tryPlant2x2 := func(ids []int64) bool {
-			if len(ids) == 0 {
+			if len(ids) != 4 {
 				return false
 			}
-			for i := range usable {
-				s := &usable[i]
+			for i := range usable2x2 {
+				s := &usable2x2[i]
 				if s.count <= 0 {
 					continue
 				}
@@ -891,15 +999,7 @@ func autoPlantLands(accountID string, c *gw.Client, cfg config.AccountConfig, la
 					appendOpLog(accountID, "farm", fmt.Sprintf("2x2 种子未就绪 seed=%d: %v", s.seedID, e2))
 					continue
 				}
-				// 2x2 种植协议兼容：
-				// 若为已合种地块或服务端要求主地，单主地与全四格均可能被支持。
-				// 首选传递推断/完整的 ids；若失败且地块数量大于1，降级尝试仅 master
 				plantErr := execFarmOp(c, "Plant", proto.EncodePlantRequest(realSeed, ids))
-				if plantErr != nil && len(ids) > 1 {
-					if err2 := execFarmOp(c, "Plant", proto.EncodePlantRequest(realSeed, []int64{ids[0]})); err2 == nil {
-						plantErr = nil
-					}
-				}
 				if plantErr == nil {
 					s.count--
 					recordOperation(accountID, "plant", int64(len(ids)))
@@ -920,34 +1020,15 @@ func autoPlantLands(accountID string, c *gw.Client, cfg config.AccountConfig, la
 				continue
 			}
 			groupKey := fmt.Sprintf("2x2:%d", u.master)
-			allEmpty := true
-			for _, id := range u.ids {
-				if landHasLivePlant(landByID[id]) {
-					allEmpty = false
-					break
-				}
-			}
-			if allEmpty && len(usable) > 0 {
-				if tryPlant2x2(u.ids) {
-					reserved2x2Mu.Lock()
-					delete(reserved2x2, groupKey)
-					reserved2x2Mu.Unlock()
-					continue
-				}
-				remainUnits = append(remainUnits, u)
-				continue
-			}
-			if len(usable) == 0 || allEmpty {
-				remainUnits = append(remainUnits, u)
+			if tryPlant2x2(u.ids) {
+				reserved2x2Mu.Lock()
+				delete(reserved2x2, groupKey)
+				reserved2x2Mu.Unlock()
 				continue
 			}
 			reserved2x2Mu.Lock()
 			reserved2x2[groupKey] = u.ids
 			reserved2x2Mu.Unlock()
-			if last2x2WaitKey != groupKey {
-				appendOpLog(accountID, "farm", fmt.Sprintf("2x2预留 等待地块%v", u.ids))
-				last2x2WaitKey = groupKey
-			}
 		}
 		units = remainUnits
 	}

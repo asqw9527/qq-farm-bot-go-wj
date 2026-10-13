@@ -15,20 +15,22 @@ func unlockedLands(n int64) map[int64]*proto.LandInfo {
 	return m
 }
 
-func TestInferEmpty2x2IDsSixCol(t *testing.T) {
+func TestInferEmpty2x2IDsFourCol(t *testing.T) {
 	lands := unlockedLands(24)
 	cases := []struct {
 		lid  int64
 		want []int64
 	}{
-		{1, []int64{1, 2, 7, 8}},
-		{5, []int64{5, 6, 11, 12}},
-		{13, []int64{13, 14, 19, 20}},
-		{17, []int64{17, 18, 23, 24}},
-		{6, nil},
-		{18, nil},
-		{19, nil},
-		{20, nil},
+		{5, []int64{5, 6, 1, 2}},
+		{6, []int64{6, 7, 2, 3}},
+		{7, []int64{7, 8, 3, 4}},
+		{9, []int64{9, 10, 5, 6}},
+		{21, []int64{21, 22, 17, 18}},
+		{23, []int64{23, 24, 19, 20}},
+		{1, nil},
+		{2, nil},
+		{4, nil},
+		{8, nil},
 		{24, nil},
 	}
 	for _, c := range cases {
@@ -39,10 +41,40 @@ func TestInferEmpty2x2IDsSixCol(t *testing.T) {
 	}
 }
 
-func TestInferEmpty2x2RejectsFourColGroup(t *testing.T) {
-	got := inferEmpty2x2IDs(19, unlockedLands(24))
+func TestInferEmpty2x2RejectsSixColGroup(t *testing.T) {
+	got := inferEmpty2x2IDs(1, unlockedLands(24))
 	if got != nil {
-		t.Fatalf("4-col group [19 20 23 24] must not be inferred, got %v", got)
+		t.Fatalf("6-col group [1 2 7 8] must not be inferred, got %v", got)
+	}
+}
+
+func TestBuild2x2LandGroupsFourCol(t *testing.T) {
+	groups := build2x2LandGroups(unlockedLands(24))
+	if len(groups) != 15 {
+		t.Fatalf("group count=%d want 15", len(groups))
+	}
+	if groups[0].master != 5 || !reflect.DeepEqual(groups[0].ids, []int64{5, 6, 1, 2}) {
+		t.Fatalf("first group=%+v want master=5 ids=[5 6 1 2]", groups[0])
+	}
+	last := groups[len(groups)-1]
+	if last.master != 23 || !reflect.DeepEqual(last.ids, []int64{23, 24, 19, 20}) {
+		t.Fatalf("last group=%+v want master=23 ids=[23 24 19 20]", last)
+	}
+}
+
+func TestSelectReady2x2GroupsSkipsOccupied(t *testing.T) {
+	lands := unlockedLands(24)
+	lands[2].Plant = &proto.PlantInfo{Phases: []*proto.PlantPhaseInfo{{Phase: proto.PhaseMature, BeginTime: 1}}}
+	ready, waiting := selectReady2x2Groups(build2x2LandGroups(lands), lands, nil)
+	for _, g := range ready {
+		for _, id := range g.ids {
+			if id == 2 {
+				t.Fatalf("ready group %v includes occupied land 2", g.ids)
+			}
+		}
+	}
+	if len(waiting) == 0 {
+		t.Fatal("want waiting groups overlapping occupied land 2")
 	}
 }
 
@@ -52,6 +84,7 @@ func TestAnalyzeFarmLandsCollectsGoldUpgrade(t *testing.T) {
 		{ID: 2, Unlocked: true, Level: 5, CouldUpgrade: false},
 		{ID: 3, Unlocked: false, CouldUnlock: true, CouldUpgrade: false},
 		{ID: 4, Unlocked: true, Level: 4, CouldUpgrade: true, MasterLandID: 1},
+		{ID: 5, Unlocked: true, Level: 4, CouldUpgrade: true, Plant: &proto.PlantInfo{Phases: []*proto.PlantPhaseInfo{{Phase: 3, BeginTime: 1}}}},
 	}
 	a := analyzeFarmLands(lands, 0)
 	if !reflect.DeepEqual(a.couldUpgrade, []int64{1}) {
