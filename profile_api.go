@@ -21,7 +21,7 @@ func registerProfileAPI(mux *http.ServeMux) {
 	mux.HandleFunc("/api/farm/harvest", handleFarmHarvest)
 	mux.HandleFunc("/api/farm/action", handleFarmAction)
 	mux.HandleFunc("/api/farm/plant", handleFarmPlant)
-	mux.HandleFunc("/api/bag", handleBagItems)       // 
+	mux.HandleFunc("/api/bag", handleBagItems)       //
 	mux.HandleFunc("/api/bag/items", handleBagItems) // 兼容旧路径
 	mux.HandleFunc("/api/bag/seeds", handleBagSeeds)
 	mux.HandleFunc("/api/bag/use", handleBagUse)
@@ -62,9 +62,13 @@ func handleFarmLands(w http.ResponseWriter, r *http.Request) {
 	}
 	all := proto.DecodeAllLandsReply(body)
 
+	// 按地块 ID 升序排列，保证 4 列表格逐行铺满；合种组跨 2x2 才能精确覆盖组内四格
+	sort.SliceStable(all.Lands, func(i, j int) bool { return all.Lands[i].ID < all.Lands[j].ID })
+
 	// ── ，逐字段构造 ──
 	serverTime := time.Now().Unix()
 	landMap := buildFarmLandMap(all.Lands)
+	mergedReps := buildMerged2x2Representatives(all.Lands)
 
 	details := make([]map[string]interface{}, 0, len(all.Lands))
 	for _, l := range all.Lands {
@@ -78,6 +82,16 @@ func handleFarmLands(w http.ResponseWriter, r *http.Request) {
 		couldUpgrade := l.CouldUpgrade
 
 		ctx := getFarmDisplayLandContext(l, landMap)
+
+		// 2x2 合种组去重：只在组内代表格（最小地块 ID）输出一次，
+		// 其余三格跳过，避免同一合种作物被渲染成四张「合种」卡片
+		if rep, ok := mergedReps[landID]; ok {
+			if rep != landID {
+				continue
+			}
+			ctx.OccupiedByMaster = false
+			landID = ctx.MasterLandID // 以主地块 ID 作为合种组卡片标识，便于铲除/催熟定位
+		}
 
 		// 未解锁
 		if !l.Unlocked {
@@ -279,6 +293,35 @@ func buildFarmLandMap(lands []*proto.LandInfo) map[int64]*proto.LandInfo {
 		}
 	}
 	return m
+}
+
+// buildMerged2x2Representatives 返回 2x2 合种组内每块地对应的代表地 ID（组内最小地块 ID）。
+// 客户端将跨 2 行 2 列渲染为一张合种卡片，因此同一合种组只能在代表格输出一次，
+// 否则四块地会各自渲染成一张「合种」卡片，导致显示数量翻四倍。
+func buildMerged2x2Representatives(lands []*proto.LandInfo) map[int64]int64 {
+	reps := map[int64]int64{}
+	for _, l := range lands {
+		if l == nil || l.ID <= 0 {
+			continue
+		}
+		slaves := farmSlaveLandIDs(l)
+		if len(slaves) == 0 || !farmHasPlantData(l) {
+			continue
+		}
+		rep := l.ID
+		for _, id := range slaves {
+			if id > 0 && id < rep {
+				rep = id
+			}
+		}
+		reps[l.ID] = rep
+		for _, id := range slaves {
+			if id > 0 {
+				reps[id] = rep
+			}
+		}
+	}
+	return reps
 }
 
 // farmSlaveLandIDs 从属土地 ID 列表
@@ -617,11 +660,11 @@ func handleBagItems(w http.ResponseWriter, r *http.Request) {
 		Icon            string `json:"icon,omitempty"`
 		ItemType        int64  `json:"itemType"`        // 6/17=果实可售, 11=道具可用
 		UID             int64  `json:"uid"`             // 物品实例 uid，出售时回传
-		Price           int64  `json:"price"`           // 
-		PriceID         int64  `json:"priceId"`         // 
+		Price           int64  `json:"price"`           //
+		PriceID         int64  `json:"priceId"`         //
 		PriceUnit       string `json:"priceUnit"`       // 1005=金豆豆/200=点券/else金
-		Level           int64  `json:"level"`           // 
-		InteractionType string `json:"interactionType"` // 
+		Level           int64  `json:"level"`           //
+		InteractionType string `json:"interactionType"` //
 		HoursText       string `json:"hoursText"`       // （默认空）
 	}
 	items := make([]bagOut, 0, len(br.Items))
@@ -783,7 +826,7 @@ func handleBagSeeds(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]interface{}{"ok": true, "data": out})
 }
 
-// handleBagUse POST /api/bag/use 
+// handleBagUse POST /api/bag/use
 func handleBagUse(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, 405, "method not allowed")
@@ -825,7 +868,7 @@ func handleBagUse(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]interface{}{"ok": true, "message": "use ok"})
 }
 
-// handleBagSell POST /api/bag/sell 
+// handleBagSell POST /api/bag/sell
 func handleBagSell(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, 405, "method not allowed")
@@ -1201,7 +1244,7 @@ func handleFriendVisitors(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]interface{}{"ok": true, "data": out})
 }
 
-// interactActionLabel 
+// interactActionLabel
 func interactActionLabel(t int32) string {
 	switch t {
 	case 1:
@@ -1215,7 +1258,7 @@ func interactActionLabel(t int32) string {
 	}
 }
 
-// buildInteractDetail 
+// buildInteractDetail
 func buildInteractDetail(rec *proto.InteractRecord) string {
 	var parts []string
 	switch rec.ActionType {

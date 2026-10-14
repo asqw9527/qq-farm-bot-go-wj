@@ -78,6 +78,27 @@ func TestSelectReady2x2GroupsSkipsOccupied(t *testing.T) {
 	}
 }
 
+func TestBuildMerged2x2Representatives(t *testing.T) {
+	plant := func() *proto.PlantInfo {
+		return &proto.PlantInfo{Phases: []*proto.PlantPhaseInfo{{Phase: proto.PhaseMature, BeginTime: 1}}}
+	}
+	lands := []*proto.LandInfo{
+		{ID: 5, Unlocked: true, LandSize: 2, SlaveLandIDs: []int64{6, 1, 2}, Plant: plant()},
+		{ID: 6, Unlocked: true, MasterLandID: 5},
+		{ID: 1, Unlocked: true, MasterLandID: 5},
+		{ID: 2, Unlocked: true, MasterLandID: 5},
+		{ID: 7, Unlocked: true, Plant: plant()},
+	}
+	reps := buildMerged2x2Representatives(lands)
+	want := map[int64]int64{5: 1, 6: 1, 1: 1, 2: 1}
+	if !reflect.DeepEqual(reps, want) {
+		t.Fatalf("reps=%v want %v", reps, want)
+	}
+	if _, ok := reps[7]; ok {
+		t.Fatal("non-2x2 land 7 must not have a representative")
+	}
+}
+
 func TestAnalyzeFarmLandsCollectsGoldUpgrade(t *testing.T) {
 	lands := []*proto.LandInfo{
 		{ID: 1, Unlocked: true, Level: 4, CouldUpgrade: true},

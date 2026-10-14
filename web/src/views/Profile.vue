@@ -79,7 +79,7 @@ async function removeAll() {
 async function landOp(l, op) {
   if (!acc()) { app.error('请先选择账号'); return }
   try {
-    const { data } = await api.post(op === 'fertilize' ? '/api/land/fertilize' : '/api/land/remove', { landId: l.id })
+    const { data } = await api.post(op === 'fertilize' ? '/api/land/fertilize' : '/api/land/remove', { landId: l.masterLandId || l.id })
     app.success(data?.ok ? (op === 'fertilize' ? '催熟完成' : '已铲除') : ('失败：' + (data?.error || '')))
     if (data?.ok) loadLands(true)
   } catch (e) { app.error('请求失败') }

@@ -184,9 +184,14 @@ func handleLandRemoveAll(w http.ResponseWriter, r *http.Request) {
 		body = rep.Body
 	}
 	all := proto.DecodeAllLandsReply(body)
+	landMap := buildFarmLandMap(all.Lands)
 	var ids []int64
 	for _, l := range all.Lands {
 		if !l.Unlocked {
+			continue
+		}
+		// 2x2 合种组只铲除主地块，从属格跳过，避免重复/非法 RemovePlant
+		if farmLinkedMasterLand(l, landMap) != nil {
 			continue
 		}
 		status := "empty"
