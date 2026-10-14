@@ -904,13 +904,9 @@ func autoPlantLands(accountID string, c *gw.Client, cfg config.AccountConfig, la
 		if seedsErr != nil {
 			appendOpLog(accountID, "farm", "2x2 背包读取失败: "+seedsErr.Error())
 		}
-		userLevel := int(c.Level())
+		// 背包内种子不做等级/解锁校验：有货即可种植，等级门槛交由服务端裁决。
 		for _, s := range seeds {
 			if s.count <= 0 || s.seedID <= 0 {
-				continue
-			}
-			if s.reqLvl > 0 && s.reqLvl > userLevel {
-				appendOpLog(accountID, "farm", fmt.Sprintf("2x2 跳过未解锁种子 %s(lv%d)", seedPlantName(s.seedID), s.reqLvl))
 				continue
 			}
 			usable2x2 = append(usable2x2, s)
