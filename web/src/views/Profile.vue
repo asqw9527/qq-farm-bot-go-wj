@@ -52,7 +52,7 @@ function fmtDur(sec) {
   const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60
   return (h > 0 ? h + ':' : '') + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0')
 }
-function landGrowPct(l) { const m = Number(l.matureInSec || 0), t = Number(l.totalGrowTime || 0); if (t <= 0 || m <= 0) return 0; return Math.min(100, Math.max(0, (m / t) * 100)) }
+function landGrowPct(l) { const m = Number(l.__left ?? l.matureInSec ?? 0), t = Number(l.totalGrowTime || 0); if (t <= 0 || m <= 0) return 0; return Math.min(100, Math.max(0, (m / t) * 100)) }
 async function loadLands(forceRefresh) { if (!acc()) return; try { const { data } = await api.get('/api/farm/lands' + (forceRefresh ? '?refresh=1' : '')); lands.value = (data?.data?.lands || data?.data || []) } catch (e) {} }
 function landCountdown() {
   const now = Date.now()

@@ -138,7 +138,7 @@ func startAutomationForAccount(accountID string) {
 	log.Printf("[automation] 账号 %s 自动化已启动", accountID)
 }
 
-// stopAutomationForAccount 停止账号的全部自动化 goroutine
+// stopAutomationForAccount 停止账号的全部自动化 goroutine 并清理账号相关的内存预留/重试缓存
 func stopAutomationForAccount(accountID string) {
 	automationMu.Lock()
 	defer automationMu.Unlock()
@@ -147,6 +147,16 @@ func stopAutomationForAccount(accountID string) {
 		delete(automationRunners, accountID)
 		log.Printf("[automation] 账号 %s 自动化已停止", accountID)
 	}
+
+	// 清理该账号的 2x2 预留状态与重试缓存，防止内存泄漏
+	reserved2x2Mu.Lock()
+	delete(reserved2x2, accountID)
+	delete(last2x2WaitKey, accountID)
+	reserved2x2Mu.Unlock()
+
+	failed2x2RetriesMu.Lock()
+	delete(failed2x2Retries, accountID)
+	failed2x2RetriesMu.Unlock()
 }
 
 // startAllAutomation 为所有已配置账号启动自动化（main 启动时调用）

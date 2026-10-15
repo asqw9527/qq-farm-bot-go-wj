@@ -176,11 +176,13 @@ func handleFarmLands(w http.ResponseWriter, r *http.Request) {
 		}
 		phaseName := farmPhaseName(phase)
 
-		// 剩余成熟时间：，减去服务器时间
+		// 剩余成熟时间：减去服务器时间
 		matureInSec := int64(0)
+		matureAt := int64(0)
 		for _, ph := range plant.Phases {
 			if ph.Phase == proto.PhaseMature && ph.BeginTime > serverTime {
 				matureInSec = ph.BeginTime - serverTime
+				matureAt = ph.BeginTime * 1000 // 毫秒时间戳，供前端本地精确倒计时
 				break
 			}
 		}
@@ -224,7 +226,7 @@ func handleFarmLands(w http.ResponseWriter, r *http.Request) {
 			"id": landID, "unlocked": true, "status": status,
 			"plantName": displayName, "plantId": plantID, "seedId": seedID, "seedImage": seedImage,
 			"phaseName": phaseName, "currentSeason": currentSeason, "totalSeason": totalSeason,
-			"matureInSec": matureInSec, "totalGrowTime": totalGrowTime,
+			"matureInSec": matureInSec, "matureAt": matureAt, "totalGrowTime": totalGrowTime,
 			"needWater": needWater, "needWeed": needWeed, "needBug": needBug,
 			"stealable": plant.Stealable,
 			"level":     level, "maxLevel": maxLevel, "landsLevel": landsLevel,
