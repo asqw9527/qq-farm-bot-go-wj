@@ -712,6 +712,22 @@ func landHasLivePlant(l *proto.LandInfo) bool {
 	return ph != nil && ph.Phase != proto.PhaseDead
 }
 
+// isLockedPlantError 判断种植错误是否为等级未解锁/锁定。
+// 这类错误表示该种子当前不可种，应清零该种子数量，避免死循环重试或阻塞地块。
+func isLockedPlantError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "锁定") ||
+		strings.Contains(msg, "未解锁") ||
+		strings.Contains(msg, "等级不足") ||
+		strings.Contains(msg, "level") ||
+		strings.Contains(msg, "lock") ||
+		strings.Contains(msg, "unlock")
+}
+
+// build2x2LandGroups 构建所有合法 2x2 组合（4 列网格、左下角 master 锚点）。
 func build2x2LandGroups(landByID map[int64]*proto.LandInfo) []land2x2Group {
 	rows := farmGridRows(landByID)
 	var groups []land2x2Group
@@ -811,6 +827,64 @@ func selectReady2x2Groups(groups []land2x2Group, landByID map[int64]*proto.LandI
 		waiting = append(waiting, g)
 	}
 	return ready, waiting
+}
+
+// selectMaxNonOverlappingGroups 在候选组中挑选数量最多的互不重叠组合（回溯搜索）。
+// 贪心从左到右选择在规则矩形上等价，但在地块不连续/部分占用时会少选，
+// 导致本可合种的地块退化成 1x1 普通种植。
+func selectMaxNonOverlappingGroups(groups []land2x2Group, limit int) []land2x2Group {
+	if len(groups) == 0 {
+		return nil
+	}
+	if limit <= 0 || limit > len(groups) {
+		limit = len(groups)
+	}
+	var best []land2x2Group
+	var search func(idx int, selected []land2x2Group, occupied map[int64]bool)
+	search = func(idx int, selected []land2x2Group, occupied map[int64]bool) {
+		if len(selected) > len(best) {
+			best = append([]land2x2Group(nil), selected...)
+		}
+		if len(selected) >= limit || idx >= len(groups) {
+			return
+		}
+		if len(selected)+len(groups)-idx <= len(best) {
+			return
+		}
+		g := groups[idx]
+		blocked := false
+		for _, id := range g.ids {
+			if occupied[id] {
+				blocked = true
+				break
+			}
+		}
+		if !blocked {
+			next := make(map[int64]bool, len(occupied)+len(g.ids))
+			for k := range occupied {
+				next[k] = true
+			}
+			for _, id := range g.ids {
+				next[id] = true
+			}
+			search(idx+1, append(selected, g), next)
+		}
+		search(idx+1, selected, occupied)
+	}
+	search(0, nil, map[int64]bool{})
+	return best
+}
+
+// total2x2SeedCount 统计本组可用四格种子的总颗数，用于限制 2x2 组数量：
+// 与官方一致，种子不够时不预留地块，剩余空地交由普通种植填充。
+func total2x2SeedCount(seeds []bagSeedItem) int64 {
+	var n int64
+	for _, s := range seeds {
+		if s.count > 0 {
+			n += s.count
+		}
+	}
+	return n
 }
 
 // reservedLandSet 返回已预留 2x2 单元的所有土地 ID 集合。
@@ -919,8 +993,16 @@ func autoPlantLands(accountID string, c *gw.Client, cfg config.AccountConfig, la
 				names = append(names, fmt.Sprintf("%s×%d", seedPlantName(s.seedID), s.count))
 			}
 			appendOpLog(accountID, "farm", "2x2 背包种子: "+strings.Join(names, "、"))
-			ready, waiting := selectReady2x2Groups(build2x2LandGroups(landByID), landByID, seen)
-			for _, g := range ready {
+			groups := build2x2LandGroups(landByID)
+			ready, waiting := selectReady2x2Groups(groups, landByID, seen)
+			// 与官方一致：2x2 组数上限 = 可用四格种子颗数。
+			// 超出种子数的就绪组不预留、不占位，直接留给普通种植填充，
+			// 避免"种子不够却预留一堆空地"或反过来"有种子却只合种少量"。
+			limit := int(total2x2SeedCount(usable2x2))
+			selected := selectMaxNonOverlappingGroups(ready, limit)
+			appendOpLog(accountID, "farm", fmt.Sprintf("2x2 选组: 构建%d 就绪%d 等待%d 上限%d 选中%d",
+				len(groups), len(ready), len(waiting), limit, len(selected)))
+			for _, g := range selected {
 				for _, id := range g.ids {
 					seen[id] = true
 				}
@@ -1003,6 +1085,11 @@ func autoPlantLands(accountID string, c *gw.Client, cfg config.AccountConfig, la
 					time.Sleep(plantDelay(cfg) + 200*time.Millisecond)
 					return true
 				}
+				if isLockedPlantError(plantErr) {
+					appendOpLog(accountID, "farm", fmt.Sprintf("2x2 作物%s 未解锁/锁定，跳过: %v", seedPlantName(realSeed), plantErr))
+					s.count = 0
+					continue
+				}
 				failed2x2RetriesMu.Lock()
 				failed2x2Retries[retryKey] = time.Now().Unix() + 90
 				failed2x2RetriesMu.Unlock()
@@ -1022,9 +1109,34 @@ func autoPlantLands(accountID string, c *gw.Client, cfg config.AccountConfig, la
 				reserved2x2Mu.Unlock()
 				continue
 			}
-			reserved2x2Mu.Lock()
-			reserved2x2[groupKey] = u.ids
-			reserved2x2Mu.Unlock()
+			// 种植未成功且没有正在重试的种子时，释放该组预留，回流给后续普通种植，
+			// 避免因某颗种子无法种下导致整整 4 块地被永久卡死为空地
+			hasRetry := false
+			nowUnix := time.Now().Unix()
+			failed2x2RetriesMu.Lock()
+			for _, s := range usable2x2 {
+				if s.count > 0 {
+					rKey := fmt.Sprintf("2x2:%v:%d", u.ids, s.seedID)
+					if t, ok := failed2x2Retries[rKey]; ok && nowUnix < t {
+						hasRetry = true
+						break
+					}
+				}
+			}
+			failed2x2RetriesMu.Unlock()
+			if hasRetry {
+				reserved2x2Mu.Lock()
+				reserved2x2[groupKey] = u.ids
+				reserved2x2Mu.Unlock()
+			} else {
+				reserved2x2Mu.Lock()
+				delete(reserved2x2, groupKey)
+				reserved2x2Mu.Unlock()
+				// 将该 2x2 组的 4 块地作为独立单地回流，让普通种植能够种上
+				for _, id := range u.ids {
+					remainUnits = append(remainUnits, unit{master: id, ids: []int64{id}})
+				}
+			}
 		}
 		units = remainUnits
 	}
