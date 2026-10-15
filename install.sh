@@ -81,8 +81,17 @@ pkg_install() {
     yum install -y "$@"
   elif have_cmd apt-get; then
     export DEBIAN_FRONTEND=noninteractive
+    # Debian/Ubuntu 的 xz 裸名不存在，实际包名为 xz-utils（Alpine/RHEL 才叫 xz）
+    local pkgs=()
+    local p
+    for p in "$@"; do
+      if [ "$p" = "xz" ]; then
+        p="xz-utils"
+      fi
+      pkgs+=("$p")
+    done
     apt-get update -y
-    apt-get install -y "$@"
+    apt-get install -y "${pkgs[@]}"
   else
     echo "未找到 dnf/yum/apt-get"
     exit 1

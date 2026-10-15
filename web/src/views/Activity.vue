@@ -88,9 +88,7 @@ function onQiXiFriendScroll(e) {
 }
 // --- 鹊桥：Operate 桩（cmd 待 08-18 抓号回填） ---
 function qixiOperate(cmdName, cmdConst, payload) {
-  const call = { svc: 'ActivityService.Operate', cmd: cmdConst, payload }
-  console.log(`[${cmdName}]`, JSON.stringify(call))
-  return call
+  return { svc: 'ActivityService.Operate', cmd: cmdConst, payload }
 }
 async function sprayLu(friend) {
   if (qixi.luStock <= 0) { app.error('灵露已空'); return false }
