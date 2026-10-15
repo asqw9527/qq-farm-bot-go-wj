@@ -199,10 +199,10 @@ func handleActivityList(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]interface{}{"ok": true, "account": accountID, "now": now, "scope": scope, "items": out})
 }
 
-// expiredActivityID 已结束的硬编码活动（鹊桥 / 雨落 / 青梅 / 公益小红花 / 快乐不独享），进行中列表不再展示。
+// expiredActivityID 已结束的硬编码活动（鹊桥 / 雨落 / 青梅 / 公益小红花 / 秋祈良愿 / 快乐不独享），进行中列表不再展示。
 func expiredActivityID(id int64) bool {
 	switch id / 100 {
-	case 20260818, 20260703, 20260812, 20260909, 20260925:
+	case 20260818, 20260703, 20260812, 20260909, 20260924, 20260925:
 		return true
 	}
 	return false
@@ -543,6 +543,7 @@ func handleActivityGuanxingClaim(w http.ResponseWriter, r *http.Request) {
 const (
 	actExchangeActID = 2026072702 // 星纱商店活动（HELU_EXCHANGE_ACTIVITY_ID）
 	actStarSandID    = 1023       // 星砂（活动通用货币）
+	actGoldCurrency  = 1001       // 金币（多币种商店的优先展示币种）
 	actExchangeCmd   = 1          // 兑换命令（HELU_EXCHANGE_CMD）
 )
 
@@ -680,29 +681,60 @@ func handleActivityShop(w http.ResponseWriter, r *http.Request) {
 	if items == nil {
 		items = []*ShopItem{}
 	}
-	// 币种以商品真实 cost.itemId 为准（S3 商城的幸运星 1029，不是写死的星砂 1023）
-	curID := int64(actStarSandID)
-	curName := ""
+	balances, mainBal := actShopBalances(ctx, accountID, items)
+	writeJSON(w, map[string]interface{}{
+		"ok": true, "account": accountID, "id": id, "items": items,
+		"balances": balances,
+		"balance":  mainBal,
+	})
+}
+
+// actShopBalances 解析商品币种名并读取全部币种余额（奶茶热销中含金币/奶茶券/钻石多币种）。
+// 返回 balances 全量数组与兼容字段 main（金币优先，否则首个币种）。
+func actShopBalances(ctx context.Context, accountID string, items []*ShopItem) ([]map[string]interface{}, map[string]interface{}) {
+	var ids []int64
+	seen := map[int64]bool{}
 	for _, it := range items {
-		if it.CurrencyID > 0 {
-			curID = it.CurrencyID
-			curName = it.CurrencyName
+		if it == nil || it.CurrencyID <= 0 {
+			continue
+		}
+		if it.CurrencyName == "" {
+			it.CurrencyName = itemDisplayName(it.CurrencyID)
+		}
+		if !seen[it.CurrencyID] {
+			seen[it.CurrencyID] = true
+			ids = append(ids, it.CurrencyID)
+		}
+	}
+	balances := make([]map[string]interface{}, 0, len(ids))
+	if len(ids) > 0 {
+		bags := petReadItems(ctx, accountID, ids...)
+		for _, id := range ids {
+			balances = append(balances, map[string]interface{}{
+				"item_id":       id,
+				"currency_name": itemDisplayName(id),
+				"count":         bags[id],
+			})
+		}
+	}
+	var main map[string]interface{}
+	for _, b := range balances {
+		if b["item_id"] == int64(actGoldCurrency) {
+			main = b
 			break
 		}
 	}
-	if curName == "" {
-		curName = itemDisplayName(curID)
+	if main == nil && len(balances) > 0 {
+		main = balances[0]
 	}
-	for _, it := range items {
-		if it.CurrencyID == curID && it.CurrencyName == "" {
-			it.CurrencyName = curName
+	if main == nil {
+		main = map[string]interface{}{
+			"item_id":       int64(actStarSandID),
+			"currency_name": itemDisplayName(int64(actStarSandID)),
+			"count":         int64(0),
 		}
 	}
-	bal := petReadItems(ctx, accountID, curID)[curID]
-	writeJSON(w, map[string]interface{}{
-		"ok": true, "account": accountID, "id": id, "items": items,
-		"balance": map[string]interface{}{"item_id": curID, "currency_name": curName, "count": bal},
-	})
+	return balances, main
 }
 
 // handleActivityShopExchange 兑换星砂商店商品（Operate cmd=1, exchange_shop_operate{id,count}）
@@ -752,27 +784,16 @@ func handleActivityShopExchange(w http.ResponseWriter, r *http.Request) {
 			items = actFindShopItems(ParseActivityGroup(gb))
 		}
 	}
-	// 刷新余额 + 商店（币种按商品真实 cost.itemId，与查询接口一致）
-	curID := int64(actStarSandID)
-	curName := ""
-	for _, it := range items {
-		if it.CurrencyID > 0 {
-			curID = it.CurrencyID
-			curName = it.CurrencyName
-			break
-		}
-	}
-	if curName == "" {
-		curName = itemDisplayName(curID)
-	}
-	bal := petReadItems(ctx, accountID, curID)[curID]
+	// 刷新余额 + 商店（多币种全量返回，兼容字段 balance 与查询接口一致）
+	balances, mainBal := actShopBalances(ctx, accountID, items)
 	if items == nil {
 		items = []*ShopItem{}
 	}
 	writeJSON(w, map[string]interface{}{
 		"ok": true, "account": accountID, "slot_id": slotID, "count": count,
-		"balance": map[string]interface{}{"item_id": curID, "currency_name": curName, "count": bal},
-		"items":   items,
+		"balances": balances,
+		"balance":  mainBal,
+		"items":    items,
 	})
 }
 

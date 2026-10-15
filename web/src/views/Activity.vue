@@ -22,7 +22,7 @@ let petNode = null   // S3 萌宠：type=18 宠物玩法节点
 
 // 面板数据
 const view = reactive({ season: null, solar: null })
-const shopState = reactive({ items: [], bal: 0, cur: '星砂', err: '' })
+const shopState = reactive({ items: [], bal: 0, bals: [], cur: '星砂', err: '' })
 const giftState = reactive({ nodes: [], summary: {}, day: 0, total: 0, err: '' })
 const petState = reactive({ data: null, err: '' })
 const petBusy = ref(false)
@@ -811,15 +811,29 @@ async function refresh() {
 /* ---------- 星砂商店 ---------- */
 async function loadShop() {
   const id = (shopNode && shopNode.info && shopNode.info.id) || 2026072702
-  shopState.items = []; shopState.bal = 0; shopState.err = ''
+  shopState.items = []; shopState.bal = 0; shopState.bals = []; shopState.err = ''
   try {
     const { data } = await api.get('/api/activity/shop', { params: { id } })
     if (!(data && data.ok)) { shopState.err = (data && data.error) || '加载失败'; return }
     shopState.items = data.items || []
-    shopState.bal = n((data.balance || {}).count)
-    shopState.cur = (data.balance || {}).currency_name || '星砂'
+    const bal = data.balance || {}
+    shopState.bal = n(bal.count)
+    shopState.cur = bal.currency_name || '星砂'
+    shopState.bals = data.balances || []
     shopState.items.forEach(it => { if (it.__qty === undefined) it.__qty = 1 })
   } catch (e) { shopState.err = '商店加载失败' }
+}
+// 按商品自身币种取余额：多币种商店（如奶茶热销中）逐项匹配 currency_id
+function balOf(it) {
+  const cid = n(it.currency_id)
+  if (shopState.bals.length) {
+    const hit = shopState.bals.find(b => n(b.item_id) === cid)
+    if (hit) return n(hit.count)
+  }
+  return shopState.bal
+}
+function curOf(it) {
+  return (it.currency_name || shopState.cur || '').trim() || '星砂'
 }
 function shopQty(it, step) {
   const max = Math.min(n(it.exchange_limit), 99)
@@ -830,7 +844,8 @@ async function shopExchange(it) {
   const id = (shopNode && shopNode.info && shopNode.info.id) || 2026072702
   const cnt = n(it.__qty) || 1
   const price = n(it.price)
-  if (price * cnt > shopState.bal) { app.error(shopState.cur + '不足：需 ' + (price * cnt) + '，当前 ' + shopState.bal + ''); return }
+  const bal = balOf(it)
+  if (price * cnt > bal) { app.error(curOf(it) + '不足：需 ' + (price * cnt) + '，当前 ' + bal + ''); return }
   try {
     const { data } = await api.post('/api/activity/shop/exchange', null, { params: { id, slotId: it.id, count: cnt } })
     if (!(data && data.ok)) { app.error('兑换失败：' + ((data && data.error) || '未知错误')); return }
@@ -1140,7 +1155,7 @@ onUnmounted(() => { window.removeEventListener('account-switched', onSwitched) }
       <template v-if="shopState.items.length || shopState.err">
         <div class="act-card">
           <div class="act-card-hd"><h4>🛍️ {{ (curPanel && curPanel.title) || '兑换商店' }}</h4><span class="act-badge">{{ shopState.items.length }} 件</span></div>
-          <div class="act-stats"><span>💰 {{ shopState.cur }}余额 <b>{{ fmtBig(shopState.bal) }}</b></span></div>
+          <div class="act-stats"><span v-for="b in shopState.bals" :key="b.item_id" class="act-bal-item">💰 {{ b.currency_name || b.item_id }} <b>{{ fmtBig(n(b.count)) }}</b></span><span v-if="!shopState.bals.length">💰 {{ shopState.cur }}余额 <b>{{ fmtBig(shopState.bal) }}</b></span></div>
         </div>
         <div v-if="shopState.err" class="act-empty">{{ shopState.err }}</div>
         <div v-else-if="!shopState.items.length" class="act-empty">暂无可兑换商品</div>
@@ -1149,7 +1164,7 @@ onUnmounted(() => { window.removeEventListener('account-switched', onSwitched) }
             <img v-if="it.image" class="act-ic" :src="it.image" alt="" loading="lazy" @error="$event.target.remove()">
             <div v-else class="ic">🌾</div>
             <div class="nm">{{ it.name || ('商品' + it.id) }}</div>
-            <div class="ct">💰 {{ n(it.price) }} {{ shopState.cur }}</div>
+            <div class="ct">💰 {{ n(it.price) }} {{ curOf(it) }}</div>
             <template v-if="it.is_repeatable">
               <div v-if="Math.min(n(it.exchange_limit), 99) <= 0" class="act-badge off">已兑完</div>
               <template v-else>
@@ -1158,13 +1173,13 @@ onUnmounted(() => { window.removeEventListener('account-switched', onSwitched) }
                   <input class="act-num" :value="it.__qty" min="1" :max="Math.min(n(it.exchange_limit), 99)" inputmode="numeric" @input="it.__qty = Math.max(1, Math.min(Math.min(n(it.exchange_limit), 99), Number($event.target.value) || 1))">
                   <button class="act-btn act-sm" @click="shopQty(it, 1)">＋</button>
                 </div>
-                <button class="act-btn act-sm" :class="{ disabled: n(it.price) > 0 && shopState.bal < n(it.price) }" :disabled="n(it.price) > 0 && shopState.bal < n(it.price)" @click="shopExchange(it)">兑换</button>
-                <div class="act-limit">限购 {{ n(it.exchange_limit) }} 个 · 单价 {{ n(it.price) }} {{ shopState.cur }}</div>
+                <button class="act-btn act-sm" :class="{ disabled: n(it.price) > 0 && balOf(it) < n(it.price) }" :disabled="n(it.price) > 0 && balOf(it) < n(it.price)" @click="shopExchange(it)">兑换</button>
+                <div class="act-limit">限购 {{ n(it.exchange_limit) }} 个 · 单价 {{ n(it.price) }} {{ curOf(it) }}</div>
               </template>
             </template>
             <template v-else>
               <span v-if="it.owned" class="act-badge off">已拥有</span>
-              <button v-else class="act-btn act-sm" :class="{ disabled: !((!it.owned && n(it.status) !== 3) && (n(it.price) > 0 ? shopState.bal >= n(it.price) : true)) }" :disabled="!((!it.owned && n(it.status) !== 3) && (n(it.price) > 0 ? shopState.bal >= n(it.price) : true))" @click="shopExchange(it)">{{ n(it.status) === 3 ? '已售' : (n(it.price) > 0 ? (shopState.bal >= n(it.price) ? '兑换' : '余额不足') : '兑换') }}</button>
+              <button v-else class="act-btn act-sm" :class="{ disabled: !((!it.owned && n(it.status) !== 3) && (n(it.price) > 0 ? balOf(it) >= n(it.price) : true)) }" :disabled="!((!it.owned && n(it.status) !== 3) && (n(it.price) > 0 ? balOf(it) >= n(it.price) : true))" @click="shopExchange(it)">{{ n(it.status) === 3 ? '已售' : (n(it.price) > 0 ? (balOf(it) >= n(it.price) ? '兑换' : '余额不足') : '兑换') }}</button>
             </template>
           </div>
         </div>

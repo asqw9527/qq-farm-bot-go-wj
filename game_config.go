@@ -82,6 +82,8 @@ var itemNameAliases = map[int]string{
 	1021404: "山丹丹",
 	1121404: "黄金·山丹丹",
 	1041404: "黄金·山丹丹",
+	1041:    "奶茶券", // S4 森野茶香季活动货币（ItemInfo 未入库）
+	1042:    "宣传喇叭", // S4 森野茶香季活动道具
 }
 
 // assetNameAliases 覆盖 Plant.json ItemInfo.json 缺失的 asset_name。
