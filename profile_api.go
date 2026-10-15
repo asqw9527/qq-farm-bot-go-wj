@@ -1492,12 +1492,20 @@ func handleFarmAction(w http.ResponseWriter, r *http.Request) {
 			detail = fmt.Sprintf("种植 %d 块地", n)
 		} else {
 			// 未指定种子：用种植策略自动选种，种植当前农场所有空地/枯死地
-			n, perr := autoPlantEmptyLands(accountID, c, cfg)
+			summary, perr := autoPlantEmptyLands(accountID, c, cfg)
 			if perr != nil {
 				writeError(w, 500, "自动种植失败: "+perr.Error())
 				return
 			}
-			detail = fmt.Sprintf("自动种植 %d 块地", n)
+			if summary.Count2x2 > 0 && summary.Count1x1 > 0 {
+				detail = fmt.Sprintf("自动种植完成：2x2合种 %d 组，普通单地 %d 块（共 %d 块地）", summary.Count2x2, summary.Count1x1, summary.TotalLands)
+			} else if summary.Count2x2 > 0 {
+				detail = fmt.Sprintf("自动种植完成：2x2合种 %d 组（共 %d 块地）", summary.Count2x2, summary.TotalLands)
+			} else if summary.Count1x1 > 0 {
+				detail = fmt.Sprintf("自动种植完成：普通单地 %d 块", summary.Count1x1)
+			} else {
+				detail = "没有可种植的空地或未成功种植任何种子"
+			}
 		}
 	default:
 		writeError(w, 400, "unknown action: "+req.Action)

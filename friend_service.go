@@ -601,7 +601,7 @@ type friendLandDetail struct {
 	TimeLeft string `json:"timeLeft"`
 }
 
-// getFriendLandsForDisplay 进入好友农场并解析地块明细（真实作物图）。
+// getFriendLandsForDisplay 进入好友农场并解析地块明细（真实作物图，2x2 合种组去重）。
 func getFriendLandsForDisplay(c *gw.Client, gid int64) ([]*friendLandDetail, error) {
 	_, enterReply, err := enterFriendFarm(c, gid, 2, "")
 	if err != nil {
@@ -610,7 +610,12 @@ func getFriendLandsForDisplay(c *gw.Client, gid int64) ([]*friendLandDetail, err
 	defer leaveFriendFarm(c, gid)
 	cacheFriendDog(gid, enterReply)
 
+	// 按地块 ID 升序排列
+	sort.SliceStable(enterReply.Lands, func(i, j int) bool { return enterReply.Lands[i].ID < enterReply.Lands[j].ID })
+
 	now := time.Now().Unix()
+	mergedReps := buildMerged2x2Representatives(enterReply.Lands)
+
 	lands := make([]*friendLandDetail, 0, len(enterReply.Lands))
 	seen := map[int64]bool{}
 	for _, l := range enterReply.Lands {
@@ -618,9 +623,21 @@ func getFriendLandsForDisplay(c *gw.Client, gid int64) ([]*friendLandDetail, err
 			continue
 		}
 		seen[l.ID] = true
+
+		landID := l.ID
+		// 2x2 合种组去重：只在组内代表格（最小地块 ID）输出一次
+		if rep, ok := mergedReps[landID]; ok {
+			if rep != landID {
+				continue
+			}
+			if l.MasterLandID > 0 {
+				landID = l.MasterLandID
+			}
+		}
+
 		status, name, progress, timeLeft := analyzeLand(l, now)
 		d := &friendLandDetail{
-			ID:       l.ID,
+			ID:       landID,
 			Name:     name,
 			Status:   status,
 			State:    iconFor(name),

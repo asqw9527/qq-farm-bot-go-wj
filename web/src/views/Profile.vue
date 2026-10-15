@@ -63,7 +63,7 @@ async function farmAction(action) {
   if (!acc()) { app.error('请先选择账号'); return }
   try {
     const { data } = await api.post('/api/farm/action', { action })
-    app.success(data?.ok ? ('操作完成：' + action) : ('失败：' + (data?.error || '未知')))
+    app.success(data?.ok ? (data?.message || ('操作完成：' + action)) : ('失败：' + (data?.error || '未知')))
     if (data?.ok) loadLands(true)
   } catch (e) { app.error('请求失败') }
 }

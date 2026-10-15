@@ -35,10 +35,10 @@ var (
 
 	// 2x2 预留机制
 	reserved2x2Mu      sync.Mutex
-	reserved2x2        = map[string][]int64{} // groupKey -> landIDs
+	reserved2x2        = map[string]map[string][]int64{} // accountID -> (groupKey -> landIDs)
 	failed2x2RetriesMu sync.Mutex
-	failed2x2Retries   = map[string]int64{} // retryKey -> retryUntil Unix
-	last2x2WaitKey     string               // 避免重复日志
+	failed2x2Retries   = map[string]map[string]int64{} // accountID -> (retryKey -> retryUntil Unix)
+	last2x2WaitKey     = map[string]string{}           // accountID -> lastGroupKey（避免重复日志）
 )
 
 type automationRunner struct {
@@ -887,12 +887,22 @@ func total2x2SeedCount(seeds []bagSeedItem) int64 {
 	return n
 }
 
-// reservedLandSet 返回已预留 2x2 单元的所有土地 ID 集合。
-func reservedLandSet() map[int64]bool {
+// reservedLandSet 返回指定账号已预留 2x2 单元的所有土地 ID 集合。
+func reservedLandSet(accountID string) map[int64]bool {
 	reserved2x2Mu.Lock()
 	defer reserved2x2Mu.Unlock()
 	m := make(map[int64]bool)
-	for _, ids := range reserved2x2 {
+	if accountID == "" {
+		for _, groups := range reserved2x2 {
+			for _, ids := range groups {
+				for _, id := range ids {
+					m[id] = true
+				}
+			}
+		}
+		return m
+	}
+	for _, ids := range reserved2x2[accountID] {
 		for _, id := range ids {
 			m[id] = true
 		}
@@ -917,11 +927,19 @@ func dedupeInt64(in []int64) []int64 {
 
 // ── 种植 ──
 
+// plantSummary 统计单轮自动种植的实际结果（2x2组数、普通块数）
+type plantSummary struct {
+	Count2x2   int // 成功种植的 2x2 合种组数（每组4块地）
+	Count1x1   int // 成功种植的普通单地块数
+	TotalLands int // 参与种植的地块总数 (Count2x2*4 + Count1x1)
+}
+
 // autoPlantLands 在给定空地/枯死地上种植（targetLandIDs 为 master/standalone 地块）
 //  1. 枯死先铲除；2) 2x2 优先（用背包四格种子预留并种植）；
 //  3. bag_priority 按背包种子顺序消耗（并按地块品质拆分）其余/剩余走第二优先策略；
 //  4. 其余策略走商城购买种植。
-func autoPlantLands(accountID string, c *gw.Client, cfg config.AccountConfig, lands []*proto.LandInfo, targetLandIDs []int64) {
+func autoPlantLands(accountID string, c *gw.Client, cfg config.AccountConfig, lands []*proto.LandInfo, targetLandIDs []int64) plantSummary {
+	var summary plantSummary
 	landByID := map[int64]*proto.LandInfo{}
 	for _, l := range lands {
 		if l != nil {
@@ -1021,14 +1039,17 @@ func autoPlantLands(accountID string, c *gw.Client, cfg config.AccountConfig, la
 				}
 				groupKey := fmt.Sprintf("2x2:%d", g.master)
 				reserved2x2Mu.Lock()
-				reserved2x2[groupKey] = g.ids
+				if reserved2x2[accountID] == nil {
+					reserved2x2[accountID] = map[string][]int64{}
+				}
+				reserved2x2[accountID][groupKey] = g.ids
 				reserved2x2Mu.Unlock()
 				for _, id := range g.ids {
 					seen[id] = true
 				}
-				if last2x2WaitKey != groupKey {
+				if last2x2WaitKey[accountID] != groupKey {
 					appendOpLog(accountID, "farm", fmt.Sprintf("2x2预留 等待地块%v", g.ids))
-					last2x2WaitKey = groupKey
+					last2x2WaitKey[accountID] = groupKey
 				}
 				break
 			}
@@ -1046,7 +1067,7 @@ func autoPlantLands(accountID string, c *gw.Client, cfg config.AccountConfig, la
 		units = append(units, unit{master: id, ids: []int64{id}})
 	}
 	if len(units) == 0 {
-		return
+		return summary
 	}
 
 	strategy := cfg.PlantingStrategy
@@ -1067,9 +1088,11 @@ func autoPlantLands(accountID string, c *gw.Client, cfg config.AccountConfig, la
 				}
 				retryKey := fmt.Sprintf("2x2:%v:%d", ids, s.seedID)
 				failed2x2RetriesMu.Lock()
-				if retryUntil, hasRetry := failed2x2Retries[retryKey]; hasRetry && time.Now().Unix() < retryUntil {
-					failed2x2RetriesMu.Unlock()
-					continue
+				if accRetries, ok := failed2x2Retries[accountID]; ok {
+					if retryUntil, hasRetry := accRetries[retryKey]; hasRetry && time.Now().Unix() < retryUntil {
+						failed2x2RetriesMu.Unlock()
+						continue
+					}
 				}
 				failed2x2RetriesMu.Unlock()
 				realSeed, e2 := ensureSeedOwned(c, s.seedID, 0, 0, 1)
@@ -1091,7 +1114,10 @@ func autoPlantLands(accountID string, c *gw.Client, cfg config.AccountConfig, la
 					continue
 				}
 				failed2x2RetriesMu.Lock()
-				failed2x2Retries[retryKey] = time.Now().Unix() + 90
+				if failed2x2Retries[accountID] == nil {
+					failed2x2Retries[accountID] = map[string]int64{}
+				}
+				failed2x2Retries[accountID][retryKey] = time.Now().Unix() + 90
 				failed2x2RetriesMu.Unlock()
 				appendOpLog(accountID, "farm", fmt.Sprintf("2x2 种植失败 seed=%d lands=%v: %v", realSeed, ids, plantErr))
 			}
@@ -1104,8 +1130,12 @@ func autoPlantLands(accountID string, c *gw.Client, cfg config.AccountConfig, la
 			}
 			groupKey := fmt.Sprintf("2x2:%d", u.master)
 			if tryPlant2x2(u.ids) {
+				summary.Count2x2++
+				summary.TotalLands += len(u.ids)
 				reserved2x2Mu.Lock()
-				delete(reserved2x2, groupKey)
+				if reserved2x2[accountID] != nil {
+					delete(reserved2x2[accountID], groupKey)
+				}
 				reserved2x2Mu.Unlock()
 				continue
 			}
@@ -1114,23 +1144,30 @@ func autoPlantLands(accountID string, c *gw.Client, cfg config.AccountConfig, la
 			hasRetry := false
 			nowUnix := time.Now().Unix()
 			failed2x2RetriesMu.Lock()
-			for _, s := range usable2x2 {
-				if s.count > 0 {
-					rKey := fmt.Sprintf("2x2:%v:%d", u.ids, s.seedID)
-					if t, ok := failed2x2Retries[rKey]; ok && nowUnix < t {
-						hasRetry = true
-						break
+			if accRetries, ok := failed2x2Retries[accountID]; ok {
+				for _, s := range usable2x2 {
+					if s.count > 0 {
+						rKey := fmt.Sprintf("2x2:%v:%d", u.ids, s.seedID)
+						if t, ok := accRetries[rKey]; ok && nowUnix < t {
+							hasRetry = true
+							break
+						}
 					}
 				}
 			}
 			failed2x2RetriesMu.Unlock()
 			if hasRetry {
 				reserved2x2Mu.Lock()
-				reserved2x2[groupKey] = u.ids
+				if reserved2x2[accountID] == nil {
+					reserved2x2[accountID] = map[string][]int64{}
+				}
+				reserved2x2[accountID][groupKey] = u.ids
 				reserved2x2Mu.Unlock()
 			} else {
 				reserved2x2Mu.Lock()
-				delete(reserved2x2, groupKey)
+				if reserved2x2[accountID] != nil {
+					delete(reserved2x2[accountID], groupKey)
+				}
 				reserved2x2Mu.Unlock()
 				// 将该 2x2 组的 4 块地作为独立单地回流，让普通种植能够种上
 				for _, id := range u.ids {
@@ -1143,7 +1180,7 @@ func autoPlantLands(accountID string, c *gw.Client, cfg config.AccountConfig, la
 
 	// bag_priority：先按背包种子顺序消耗；按地块品质拆分
 	if strategy == "bag_priority" {
-		reserved := reservedLandSet()
+		reserved := reservedLandSet(accountID)
 		allowed := normalizeFertilizerLandTypes(cfg.BagPriorityLandTypes) // 5 种品质，空集/全选=不限制
 		unrestricted := len(allowed) == 0 || len(allowed) >= 5
 		var prefMasters, otherMasters []int64
@@ -1171,10 +1208,12 @@ func autoPlantLands(accountID string, c *gw.Client, cfg config.AccountConfig, la
 				prefMasters = append(prefMasters, u.master)
 			}
 		}
-		remaining, fallbackAllowed, e := plantBagSeedsForLands(accountID, c, cfg, prefMasters)
+		remaining, fallbackAllowed, bagPlanted, e := plantBagSeedsForLands(accountID, c, cfg, prefMasters)
+		summary.Count1x1 += bagPlanted
+		summary.TotalLands += bagPlanted
 		if e != nil {
 			appendOpLog(accountID, "farm", "背包种子读取失败，跳过本轮: "+e.Error())
-			return
+			return summary
 		}
 		fallbackLands := append([]int64{}, otherMasters...)
 		if fallbackAllowed {
@@ -1185,13 +1224,15 @@ func autoPlantLands(accountID string, c *gw.Client, cfg config.AccountConfig, la
 			if fb == "" {
 				fb = "level"
 			}
-			plantFromShopLands(accountID, c, cfg, fallbackLands, fb)
+			shopPlanted := plantFromShopLands(accountID, c, cfg, fallbackLands, fb)
+			summary.Count1x1 += shopPlanted
+			summary.TotalLands += shopPlanted
 		}
-		return
+		return summary
 	}
 
 	// 其余策略：商城购买种植
-	reserved := reservedLandSet()
+	reserved := reservedLandSet(accountID)
 	var masters []int64
 	for _, u := range units {
 		if reserved[u.master] {
@@ -1209,7 +1250,10 @@ func autoPlantLands(accountID string, c *gw.Client, cfg config.AccountConfig, la
 		}
 		masters = append(masters, u.master)
 	}
-	plantFromShopLands(accountID, c, cfg, masters, "")
+	shopPlanted := plantFromShopLands(accountID, c, cfg, masters, "")
+	summary.Count1x1 += shopPlanted
+	summary.TotalLands += shopPlanted
+	return summary
 }
 
 // plantDelay 返回种植延迟（默认 2s）
@@ -1222,11 +1266,11 @@ func plantDelay(cfg config.AccountConfig) time.Duration {
 }
 
 // autoPlantEmptyLands 手动"一键种植"：对当前农场所有空地/枯死地用种植策略自动选种种植
-func autoPlantEmptyLands(accountID string, c *gw.Client, cfg config.AccountConfig) (int, error) {
+func autoPlantEmptyLands(accountID string, c *gw.Client, cfg config.AccountConfig) (plantSummary, error) {
 	rep, err := c.Request(context.Background(), plantService, "AllLands",
 		proto.EncodeAllLandsRequest(0), 15*time.Second)
 	if err != nil {
-		return 0, err
+		return plantSummary{}, err
 	}
 	lands := proto.DecodeAllLandsReply(rep.Body).Lands
 	a := analyzeFarmLands(lands, time.Now().Unix())
@@ -1234,10 +1278,10 @@ func autoPlantEmptyLands(accountID string, c *gw.Client, cfg config.AccountConfi
 	targets = append(targets, a.empty...)
 	targets = dedupeInt64(targets)
 	if len(targets) == 0 {
-		return 0, nil
+		return plantSummary{}, nil
 	}
-	autoPlantLands(accountID, c, cfg, lands, targets)
-	return len(targets), nil
+	summary := autoPlantLands(accountID, c, cfg, lands, targets)
+	return summary, nil
 }
 
 // plantOnLands 在指定地块种植指定种子
@@ -1690,19 +1734,19 @@ func listBagSeeds(accountID string, c *gw.Client, cfg config.AccountConfig, size
 // plantBagSeedsForLands 用背包 1x1 种子按优先级顺序种植。
 // 每种背包种子按其数量消耗；返回未被背包种子覆盖的剩余空地主地 ID，以及是否允许用第二优先策略补种
 // （某背包种子部分种植失败时 fallbackAllowed=false，避免误购商城种子）。
-func plantBagSeedsForLands(accountID string, c *gw.Client, cfg config.AccountConfig, masters []int64) (remaining []int64, fallbackAllowed bool, err error) {
+func plantBagSeedsForLands(accountID string, c *gw.Client, cfg config.AccountConfig, masters []int64) (remaining []int64, fallbackAllowed bool, plantedCount int, err error) {
 	fallbackAllowed = true
 	if len(masters) == 0 {
-		return nil, true, nil
+		return nil, true, 0, nil
 	}
 	seeds, err := listBagSeeds(accountID, c, cfg, 1)
 	if err != nil {
-		return masters, false, err
+		return masters, false, 0, err
 	}
 	if len(seeds) == 0 {
-		return masters, true, nil
+		return masters, true, 0, nil
 	}
-	reserved := reservedLandSet()
+	reserved := reservedLandSet(accountID)
 	remainingSet := map[int64]bool{}
 	for _, m := range masters {
 		if reserved[m] {
@@ -1743,6 +1787,7 @@ func plantBagSeedsForLands(accountID string, c *gw.Client, cfg config.AccountCon
 			}
 			delete(remainingSet, m)
 			planted++
+			plantedCount++
 			recordOperation(accountID, "plant", 1)
 			appendOpLog(accountID, "farm", fmt.Sprintf("背包种植种子 %d → 1 块地", realSeed))
 			time.Sleep(plantDelay(cfg) + 200*time.Millisecond)
@@ -1751,21 +1796,17 @@ func plantBagSeedsForLands(accountID string, c *gw.Client, cfg config.AccountCon
 		// 等级锁定种子整批无法种植（planted==0）时不阻断 fallback
 		if planted < int(maxCount) && len(remainingSet) > 0 && (!levelLocked || planted > 0) {
 			fallbackAllowed = false
+			break
 		}
 	}
 	for m := range remainingSet {
 		remaining = append(remaining, m)
 	}
-	return remaining, fallbackAllowed, nil
+	return remaining, fallbackAllowed, plantedCount, nil
 }
 
-// plantFromShopLands 对给定主地列表按策略从商城选种购买并种植。
-// overrideStrategy 非空时覆盖账号策略（用于 bag_priority 第二优先补种）。
-// 优先种植指定种子时先消耗背包；其余按候选序列逐个尝试，候选买/种失败时继续下一个，直到剩余空地种完。
-func plantFromShopLands(accountID string, c *gw.Client, cfg config.AccountConfig, masters []int64, overrideStrategy string) {
-	if len(masters) == 0 {
-		return
-	}
+// plantFromShopLands 对给定主地列表按策略从商城选种购买并种植，返回成功种植的单地数。
+func plantFromShopLands(accountID string, c *gw.Client, cfg config.AccountConfig, masters []int64, overrideStrategy string) int {
 	strategy := overrideStrategy
 	if strategy == "" {
 		strategy = cfg.PlantingStrategy
@@ -1773,7 +1814,7 @@ func plantFromShopLands(accountID string, c *gw.Client, cfg config.AccountConfig
 			strategy = "level"
 		}
 	}
-	reserved := reservedLandSet()
+	reserved := reservedLandSet(accountID)
 	remaining := map[int64]bool{}
 	for _, m := range masters {
 		if reserved[m] {
@@ -1781,19 +1822,20 @@ func plantFromShopLands(accountID string, c *gw.Client, cfg config.AccountConfig
 		}
 		remaining[m] = true
 	}
+	startRemaining := len(remaining)
 	// 优先种植指定种子：背包里有就直接用（商店无货也能种），商店兜底
 	if strategy == "preferred" && cfg.PreferredSeedID > 0 {
 		if seedID, ok := pickBagSeedByID(accountID, c, int64(cfg.PreferredSeedID)); ok {
 			plantOneSeed(accountID, c, cfg, seedID, 0, 0, remaining)
 			if len(remaining) == 0 {
-				return
+				return startRemaining - len(remaining)
 			}
 		}
 	}
 	cands, err := findSeedCandidates(c, cfg, strategy)
 	if err != nil {
 		appendOpLog(accountID, "farm", "种植跳过：无可用种子 ("+err.Error()+")")
-		return
+		return startRemaining - len(remaining)
 	}
 	for _, cand := range cands {
 		if len(remaining) == 0 {
@@ -1801,6 +1843,7 @@ func plantFromShopLands(accountID string, c *gw.Client, cfg config.AccountConfig
 		}
 		plantOneSeed(accountID, c, cfg, cand.seedID, cand.goodsID, cand.price, remaining)
 	}
+	return startRemaining - len(remaining)
 }
 
 // plantOneSeed 用指定种子在剩余主地上种植（逐块）。购买或种植失败即停，剩余地交给调用方换候选。
