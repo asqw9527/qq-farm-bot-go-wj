@@ -64,10 +64,10 @@ func decodeVisitBasic(buf []byte) *VisitBasic {
 
 // VisitEnterReply 进入好友农场响应
 type VisitEnterReply struct {
-	Basic        *VisitBasic
-	Lands        []*LandInfo
-	DogID        int64 // 解析自 brief_dog_info
-	DogName      string
+	Basic   *VisitBasic
+	Lands   []*LandInfo
+	DogID   int64 // 解析自 brief_dog_info
+	DogName string
 }
 
 // DecodeVisitEnterReply 解析 Enter 响应。

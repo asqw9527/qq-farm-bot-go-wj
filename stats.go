@@ -55,10 +55,9 @@ func statsFilePath(accountID string) string {
 	return filepath.Join(dataDir, "stats", accountID+".json")
 }
 
-// getAccountStats 加载并确保今日统计（跨天自动重置）
-func getAccountStats(accountID string) *AccountStats {
-	statsMu.Lock()
-	defer statsMu.Unlock()
+// accountStatsLocked 加载并确保今日统计（跨天自动重置）。
+// 要求调用方已持有 statsMu；返回的指针只可在持锁期间访问。
+func accountStatsLocked(accountID string) *AccountStats {
 	if s, ok := statsData[accountID]; ok {
 		if s.Date == todayKey() {
 			return s
@@ -105,17 +104,22 @@ func saveStatsFile(accountID string, s *AccountStats) {
 // recordOperation 记录一次操作
 // recordGift 同气礼包（物品 101351 增量）累计
 func recordGift(accountID string, delta int64) {
-	s := getAccountStats(accountID)
+	statsMu.Lock()
+	s := accountStatsLocked(accountID)
 	s.TongQiGift += delta
+	total := s.TongQiGift
 	saveStatsFile(accountID, s)
-	appendOpLog(accountID, "friend", fmt.Sprintf("获得同气连枝礼包 +%d (今日: %d)", delta, s.TongQiGift))
+	statsMu.Unlock()
+	appendOpLog(accountID, "friend", fmt.Sprintf("获得同气连枝礼包 +%d (今日: %d)", delta, total))
 }
 
 func recordOperation(accountID, opType string, count int64) {
 	if opType == "" || count <= 0 {
 		return
 	}
-	acc := getAccountStats(accountID)
+	statsMu.Lock()
+	defer statsMu.Unlock()
+	acc := accountStatsLocked(accountID)
 	// 兜底：新操作 key（如 helpFarming）在已持久化旧 map 中缺失时自动补 0，确保能记录
 	if _, ok := acc.Operations[opType]; !ok {
 		acc.Operations[opType] = 0
@@ -126,7 +130,9 @@ func recordOperation(accountID, opType string, count int64) {
 
 // initStats 初始化账号统计（登录时记录初始金币/经验/点券）
 func initStats(accountID string, gold, exp, coupon int64) {
-	acc := getAccountStats(accountID)
+	statsMu.Lock()
+	defer statsMu.Unlock()
+	acc := accountStatsLocked(accountID)
 	if !statsInit[accountID] {
 		acc.InitGold, acc.InitExp, acc.InitCoupon = gold, exp, coupon
 		acc.LastGold, acc.LastExp = gold, exp
@@ -137,7 +143,9 @@ func initStats(accountID string, gold, exp, coupon int64) {
 
 // updateStats 跟踪金币/经验增量（今日收益 totalGold 来源）
 func updateStats(accountID string, gold, exp int64) {
-	acc := getAccountStats(accountID)
+	statsMu.Lock()
+	defer statsMu.Unlock()
+	acc := accountStatsLocked(accountID)
 	if gold > acc.LastGold {
 		acc.GoldGained += gold - acc.LastGold
 	}
@@ -150,7 +158,9 @@ func updateStats(accountID string, gold, exp int64) {
 
 // getTodayIncome 今日收益数据
 func getTodayIncome(accountID string) map[string]interface{} {
-	acc := getAccountStats(accountID)
+	statsMu.Lock()
+	defer statsMu.Unlock()
+	acc := accountStatsLocked(accountID)
 	op := acc.Operations
 	m := map[string]interface{}{
 		// 顶部「收益」= sell（出售获得金币）， sell={label:'收益'}

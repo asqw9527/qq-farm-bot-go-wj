@@ -68,7 +68,6 @@ type AceService struct {
 
 	mu        sync.Mutex
 	stopped   bool
-	inFlight  bool
 	failures  int
 	lastError string
 	uploaded  int
@@ -95,7 +94,7 @@ func startAceService(c *gw.Client, accountID string) *AceService {
 		nextProcess:   now.Add(aceProcessIntervalMs * time.Millisecond),
 		nextHeartbeat: now.Add(aceHeartbeatIntervalMs * time.Millisecond),
 		nextSpeed:     now.Add(aceSpeedCheckInterval),
-		nextPoll:      now.Add(acePollIntervalMs * time.Millisecond), // 
+		nextPoll:      now.Add(acePollIntervalMs * time.Millisecond), //
 		nextStatus:    now.Add(aceStatusDelay),
 		nextFuncCheck: now.Add(aceFunctionCheckDelay),
 		lastSpeedAt:   now,

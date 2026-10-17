@@ -28,17 +28,17 @@ const fertilizerContainerLimitHours = 990
 
 // 普通化肥每小时提供时间（按物品 ID）
 var normalFertilizerItemHours = map[int]float64{
-	79873: 1, // 1h
-	80514: 4, // 4h
-	80003: 8, // 8h
+	79873: 1,  // 1h
+	80514: 4,  // 4h
+	80003: 8,  // 8h
 	80132: 12, // 12h
 }
 
 // 有机化肥每小时提供时间（按物品 ID）
 var organicFertilizerItemHours = map[int]float64{
-	80011: 1, // 1h
-	80012: 4, // 4h
-	80013: 8, // 8h
+	80011: 1,  // 1h
+	80012: 4,  // 4h
+	80013: 8,  // 8h
 	80014: 12, // 12h
 }
 
@@ -52,7 +52,7 @@ type fertilizerContainerHours struct {
 	organic float64
 }
 
-// collectFertilizerUsePayload 
+// collectFertilizerUsePayload
 // 从背包物品中收集化肥类物品的使用负载（id → 累计 count，去重合并）
 func collectFertilizerUsePayload(items []proto.BagItem) []fertilizerPayload {
 	seen := map[int64]int64{}
@@ -76,7 +76,7 @@ func collectFertilizerUsePayload(items []proto.BagItem) []fertilizerPayload {
 	return out
 }
 
-// getContainerHoursFromBagItems 
+// getContainerHoursFromBagItems
 // 从背包物品读取化肥容器剩余时间（秒 → 小时）普通 1011 / 有机 1012
 func getContainerHoursFromBagItems(items []proto.BagItem) fertilizerContainerHours {
 	var h fertilizerContainerHours
@@ -94,7 +94,7 @@ func getContainerHoursFromBagItems(items []proto.BagItem) fertilizerContainerHou
 	return h
 }
 
-// getFertilizerItemTypeAndHours 
+// getFertilizerItemTypeAndHours
 // 返回化肥类型（normal/organic/other）与单件提供小时
 func getFertilizerItemTypeAndHours(itemID int64) (string, float64) {
 	if h, ok := normalFertilizerItemHours[int(itemID)]; ok {
@@ -103,7 +103,7 @@ func getFertilizerItemTypeAndHours(itemID int64) (string, float64) {
 	if h, ok := organicFertilizerItemHours[int(itemID)]; ok {
 		return "organic", h
 	}
-	if it, ok := itemInfoMap[int(itemID)]; ok {
+	if it, ok := getItemByID(int(itemID)); ok {
 		switch it.InteractionType {
 		case "fertilizer":
 			return "normal", 1
@@ -114,7 +114,7 @@ func getFertilizerItemTypeAndHours(itemID int64) (string, float64) {
 	return "other", 0
 }
 
-// runFertilizerGiftOnce 
+// runFertilizerGiftOnce
 // 自动使用背包中的化肥类道具填充容器（容器满则自然跳过）返回本次使用数量。
 func runFertilizerGiftOnce(accountID string, c *gw.Client) int64 {
 	ctx := context.Background()

@@ -90,32 +90,6 @@ func dropAccountWork(accountID string) {
 	workMu.Unlock()
 }
 
-// submitAccountWork 将账号操作投递到该账号唯一串行执行线执行并等待完成。
-// 前端 HTTP 操作投递到账号 worker 单线程执行。
-func submitAccountWork(accountID string, fn func()) error {
-	// 已在账号串行执行线内（同 goroutine 正在执行一段外部任务，其内部又发起 RPC）→ 直接内联执行。
-	lineExecMu.Lock()
-	inline := lineExec[accountID]
-	lineExecMu.Unlock()
-	if inline {
-		fn()
-		return nil
-	}
-	q := ensureAccountWork(accountID)
-	w := &accountWork{fn: fn, done: make(chan struct{})}
-	select {
-	case q <- w:
-	case <-time.After(5 * time.Second):
-		return errors.New("账号串行执行线繁忙")
-	}
-	select {
-	case <-w.done:
-		return nil
-	case <-time.After(30 * time.Second):
-		return errors.New("账号操作执行超时")
-	}
-}
-
 // startAutomationForAccount 为账号启动自动化调度器（已存在则先停后起）
 // 每账号只有【一个】串行调度器，绝不为同账号起多个并行 goroutine。
 func startAutomationForAccount(accountID string) {
@@ -1592,52 +1566,6 @@ func sortSeedCandsByRanking(cands []seedCand, candMap map[int64]seedCand, strate
 	})
 }
 
-// pickBagSeed 背包优先：返回背包中可用的种子（count>0 且 1x1）按 BagSeedPriority 排序
-func pickBagSeed(accountID string, c *gw.Client, cfg config.AccountConfig) (int64, bool) {
-	rep, err := c.Request(context.Background(), "gamepb.itempb.ItemService", "Bag",
-		proto.EncodeBagRequest(), 12*time.Second)
-	if err != nil {
-		return 0, false
-	}
-	priority := map[int]int{}
-	for i, s := range cfg.BagSeedPriority {
-		priority[s] = i
-	}
-	type bagSeed struct {
-		seedID int64
-		count  int64
-		reqLvl int
-		prio   int
-	}
-	var seeds []bagSeed
-	for _, it := range proto.DecodeBagReply(rep.Body).Items {
-		if it.ID <= 0 || it.Count <= 0 || !isSeedItemID(it.ID) {
-			continue
-		}
-		// 背包已有种子全部参与种植（含活动种子）不再排除活动种子/黑名单；
-		// 事件种子商店买不到，应只在其不在背包时走商店排除。
-		pe, ok := plantForSeed(int(it.ID))
-		if !ok || pe.Size != 1 {
-			continue
-		}
-		p, has := priority[int(it.ID)]
-		if !has {
-			p = 1 << 30
-		}
-		seeds = append(seeds, bagSeed{seedID: it.ID, count: it.Count, reqLvl: getSeedLevel(int(it.ID)), prio: p})
-	}
-	if len(seeds) == 0 {
-		return 0, false
-	}
-	sort.SliceStable(seeds, func(i, j int) bool {
-		if seeds[i].prio != seeds[j].prio {
-			return seeds[i].prio < seeds[j].prio
-		}
-		return seeds[i].reqLvl > seeds[j].reqLvl
-	})
-	return seeds[0].seedID, true
-}
-
 // ensureSeedOwned 背包种子不足时从商店购买。
 // 返回值为实际应种植的种子 ID：购买成功时优先用 buyResult.get_items[0].id
 // （部分礼包商品实际产出种子 ID 与 goods.item_id 不同）未购买（背包已有）时返回入参 seedID。
@@ -2180,7 +2108,7 @@ func autoSellAfterHarvest(accountID string, c *gw.Client) {
 	sell := make([]proto.SellItem, 0, len(items))
 	for _, it := range items {
 		if it.ID > 0 && it.Count > 0 && isFruitItemID(it.ID) && !autoSellSkipItemIDs[it.ID] {
-			sell = append(sell, proto.SellItem{ID: it.ID, Count: it.Count, UID: it.UID})
+			sell = append(sell, proto.SellItem(it))
 		}
 	}
 	if len(sell) == 0 {

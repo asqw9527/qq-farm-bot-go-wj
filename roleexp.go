@@ -1,8 +1,8 @@
 package main
 
 import (
-	"encoding/json"
 	_ "embed"
+	"encoding/json"
 )
 
 //go:embed RoleLevel.json

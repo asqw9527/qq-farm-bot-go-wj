@@ -508,10 +508,3 @@ func handleActivityPetOperate(w http.ResponseWriter, r *http.Request) {
 		"data": petBuildState(ctx, accountID, body),
 	})
 }
-
-// 保留：从 group 里取子节点 head 名（活动名统一由服务端 head.name 提供）
-func petNodeName(headRaw []byte) string {
-	return strings.TrimSpace(actStr(readActFields(headRaw), 4))
-}
-
-var _ = strconv.Itoa

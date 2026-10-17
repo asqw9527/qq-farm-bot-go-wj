@@ -127,15 +127,15 @@ type botScanResult struct {
 // ============================================================
 
 type friendValue struct {
-	GID        int64 `json:"gid"`
-	Value      int   `json:"value"`
+	GID        int64  `json:"gid"`
+	Value      int    `json:"value"`
 	Level      string `json:"level"`
-	StealValue int   `json:"stealValue"` // 偷价值（快照，供前端展示）
-	RiskScore  int   `json:"riskScore"`  // 挂嫌疑分（getStealValue 实时计算用）
-	HelpCount  int   `json:"helpCount"`
-	StealCount int   `json:"stealCount"`
-	BadCount   int   `json:"badCount"`
-	GuardDog   bool  `json:"guardDog"`
+	StealValue int    `json:"stealValue"` // 偷价值（快照，供前端展示）
+	RiskScore  int    `json:"riskScore"`  // 挂嫌疑分（getStealValue 实时计算用）
+	HelpCount  int    `json:"helpCount"`
+	StealCount int    `json:"stealCount"`
+	BadCount   int    `json:"badCount"`
+	GuardDog   bool   `json:"guardDog"`
 }
 
 var (
@@ -407,10 +407,10 @@ func analyzeBotSamples(accountID string, friends []*proto.GameFriend) []botScanR
 
 		// ---- 综合评分（0-100）----
 		score := 0
-		score += int(periodicity * 40)                              // 间隔规律性 40
-		score += int(clamp01(float64(activeHours-12)/12) * 20)      // 活跃时长 20
-		score += int(clamp01(nightRatio/0.3) * 20)                  // 凌晨占比 20
-		score += int(clamp01(avgPerDay/50) * 20)                    // 日均频率 20
+		score += int(periodicity * 40)                         // 间隔规律性 40
+		score += int(clamp01(float64(activeHours-12)/12) * 20) // 活跃时长 20
+		score += int(clamp01(nightRatio/0.3) * 20)             // 凌晨占比 20
+		score += int(clamp01(avgPerDay/50) * 20)               // 日均频率 20
 		if helpOnly {
 			score += 8 // 行为单一性加分
 		}

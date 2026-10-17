@@ -30,15 +30,6 @@ func registerAccountAPI(mux *http.ServeMux) {
 	mux.HandleFunc("/api/yyb/qr/confirm", handleYybQRConfirm)
 }
 
-// accountOwner returns the username that owns the account, or "" if not found
-func accountOwner(accountID string) string {
-	acc := models.GetAccountByID(accountID)
-	if acc == nil {
-		return ""
-	}
-	return acc.Username
-}
-
 func isAdminUser(u *models.User) bool {
 	return u != nil && (u.Role == "admin" || u.Role == "super_admin")
 }
@@ -154,14 +145,14 @@ func handleAccounts(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var body struct {
-			Name       string                     `json:"name"`
-			Code       string                     `json:"code"`
-			Platform   string                     `json:"platform"` // "qq" / "wx"
-			QQ         string                     `json:"qq"`
-			UIN        string                     `json:"uin"`
-			GID        string                     `json:"gid"`
-			OpenID     string                     `json:"openId"`
-			Thirdparty *models.ThirdpartyConfig   `json:"thirdparty"`
+			Name       string                   `json:"name"`
+			Code       string                   `json:"code"`
+			Platform   string                   `json:"platform"` // "qq" / "wx"
+			QQ         string                   `json:"qq"`
+			UIN        string                   `json:"uin"`
+			GID        string                   `json:"gid"`
+			OpenID     string                   `json:"openId"`
+			Thirdparty *models.ThirdpartyConfig `json:"thirdparty"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			writeError(w, 400, "invalid body")
@@ -243,7 +234,6 @@ func handleAccounts(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 405, "method not allowed")
 	}
 }
-
 
 // handleActiveAccount 获取/切换当前活跃账号
 func handleActiveAccount(w http.ResponseWriter, r *http.Request) {

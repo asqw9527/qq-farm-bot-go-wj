@@ -243,26 +243,29 @@ func resolveAccountID(accountID string) string {
 // resolveAccountIDWithOwner：解析请求中的账号 ID。
 // 如果用户已登录且请求解析出的账号不属于该用户，则返回空字符串（表示无权访问）。
 // 如果账号ID为空或"default"，则优先返回当前用户的第一个账号（而非全局默认账号）。
+// 无用户上下文（仅管理员 token）时返回 "default"，由 Get 解析为默认账号。
 func resolveAccountIDWithOwner(r *http.Request, accountID string) string {
 	u := currentUser(r)
 	if accountID == "" || accountID == "default" {
 		if u != nil {
 			return firstOwnedAccountID(u)
 		}
-		return ""
+		return "default"
 	}
 	if u != nil && !isAccountAccessible(u, accountID) {
+		// 返回空串表示无权访问；调用方不得回退到全局默认账号，否则会造成越权。
 		return ""
 	}
 	return accountID
 }
 
 // Get 获取账号的活跃网关连接；无连接时按自动重连策略决定是否立即连接。
-// - 首次连接（本进程内从未建连）：立即连接；
-// - 自动重连开启且是断线重连：**不**立即连接，交给 scanAutoReconnect 按
-//   ReconnectDelayMin 延迟调度（返回明确离线错误，避免前端轮询把延迟顶成秒级重连、
-//   同时绕过 ReconnectMaxAttempts 上限）；
-// - 自动重连关闭 / 超时型断连（服务端抖动）：立即连接（快速恢复）。
+//   - 首次连接（本进程内从未建连）：立即连接；
+//   - 自动重连开启且是断线重连：**不**立即连接，交给 scanAutoReconnect 按
+//     ReconnectDelayMin 延迟调度（返回明确离线错误，避免前端轮询把延迟顶成秒级重连、
+//     同时绕过 ReconnectMaxAttempts 上限）；
+//   - 自动重连关闭 / 超时型断连（服务端抖动）：立即连接（快速恢复）。
+//
 // code 过期失败时尝试用 openid 自动刷新 code 后重连。
 func (p *ClientPool) Get(accountID string) (*gw.Client, error) {
 	return p.get(accountID, false)
@@ -270,10 +273,12 @@ func (p *ClientPool) Get(accountID string) (*gw.Client, error) {
 
 // get force=true 时无视自动重连延迟/停止态立即连接（手动更新 code / 手动重连等主动路径）。
 func (p *ClientPool) get(accountID string, force bool) (*gw.Client, error) {
-	accountID = resolveAccountID(accountID)
+	// 空账号ID直接拒绝：不得回退到全局默认账号。
+	// 归属校验失败（越权）会得到空串，此处拒绝可避免误操作用户无权访问的账号。
 	if accountID == "" {
 		return nil, fmt.Errorf("没有可用的账号，请先在账号页添加/切换")
 	}
+	accountID = resolveAccountID(accountID)
 	if c := p.cached(accountID); c != nil && !c.IsClosed() {
 		return c, nil
 	}
@@ -290,7 +295,7 @@ func (p *ClientPool) get(accountID string, force bool) (*gw.Client, error) {
 		cfg := models.GetAutoReconnect(accountID)
 		if cfg.Enabled && cfg.ReconnectDelayMin > 0 {
 			p.mu.Lock()
-			_, hadConn := p.m[accountID]   // 之前是否建过连接（断线重连 vs 首次连接）
+			_, hadConn := p.m[accountID] // 之前是否建过连接（断线重连 vs 首次连接）
 			transient := p.transientClose[accountID]
 			stopped := p.stopped[accountID]
 			since, hasSince := p.offlineSince[accountID]

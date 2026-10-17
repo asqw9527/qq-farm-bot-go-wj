@@ -968,38 +968,3 @@ func addFriendBlacklist(accountID string, gid int64, name string) {
 	m[gid] = blacklistEntry{GID: gid, Name: name, Reason: "手动拉黑", AddedAt: time.Now().Format("2006-01-02 15:04"), SkipSteal: true, SkipHelp: true}
 	writeBlacklist(accountID, m)
 }
-
-// seedKnownFriendGidsFromVisitors 从访客记录获取初始好友 GID
-func seedKnownFriendGidsFromVisitors(c *gw.Client) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
-	defer cancel()
-	// Try each RPC candidate for InteractRecords
-	var records []*proto.InteractRecord
-	for _, cand := range proto.InteractRecordCandidates {
-		rep, err := c.Request(ctx, cand[0], cand[1], proto.EncodeInteractRecordsRequest(), 12*time.Second)
-		if err == nil {
-			records = proto.DecodeInteractRecordsReply(rep.Body)
-			break
-		}
-	}
-	if len(records) == 0 {
-		return fmt.Errorf("no visitor records")
-	}
-	// 去重收集 visitorGid
-	seen := map[int64]bool{}
-	var gids []int64
-	for _, r := range records {
-		if r == nil || r.VisitorGID <= 0 {
-			continue
-		}
-		if !seen[r.VisitorGID] {
-			seen[r.VisitorGID] = true
-			gids = append(gids, r.VisitorGID)
-		}
-	}
-	if len(gids) == 0 {
-		return fmt.Errorf("no visitor GIDs")
-	}
-	fmt.Printf("[friend] 首次登录从访客获取 %d 个好友GID\n", len(gids))
-	return nil
-}

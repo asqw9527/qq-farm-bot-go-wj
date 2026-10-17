@@ -2,6 +2,7 @@ package proto
 
 // gamepb.interactpb 访客互动记录编解码。
 // 多服务路由候选：
+//
 //	gamepb.interactpb.InteractService   InteractRecords / GetInteractRecords
 //	gamepb.interactpb.VisitorService    InteractRecords / GetInteractRecords
 var InteractRecordCandidates = [][2]string{

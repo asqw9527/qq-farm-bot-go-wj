@@ -22,7 +22,7 @@ import (
 //   - ShopService.ShopInfo (shop_id=2 种子商店) / ShopService.BuyGoods
 // ============================================================
 
-const seedShopType = 2   // 种子商店
+const seedShopType = 2    // 种子商店
 const buyAllDelayMs = 200 // 一键购买间隔
 
 func registerIllustratedAPI(mux *http.ServeMux) {
@@ -221,7 +221,7 @@ func handleIllustratedGet(w http.ResponseWriter, r *http.Request) {
 	summary := summarizeIllustratedItems(items)
 
 	writeJSON(w, map[string]interface{}{
-		"ok":   true,
+		"ok": true,
 		"data": map[string]interface{}{
 			"items":     items,
 			"summary":   summary,

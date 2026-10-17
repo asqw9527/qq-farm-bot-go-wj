@@ -151,7 +151,7 @@ func buyFreeGiftsGo(ctx context.Context, accountID string) int {
 		if _, e := rpcRequest(ctx, accountID, mallSvc, "Purchase", proto.EncodePurchaseRequest(g.GoodsID, 1), 12*time.Second); e == nil {
 			bought++
 		}
-		time.Sleep(300 * time.Millisecond) // 
+		time.Sleep(300 * time.Millisecond) //
 	}
 	dailyGiftMu.Lock()
 	freeGiftDoneDate[accountID] = todayKey()
@@ -382,7 +382,7 @@ func claimEmailsGo(ctx context.Context, accountID string) int {
 			}
 			claimed += len(ids)
 		}
-		time.Sleep(300 * time.Millisecond) // 
+		time.Sleep(300 * time.Millisecond) //
 	}
 	// 批量失败的逐条单领
 	for _, em := range claimable {
@@ -512,8 +512,8 @@ var (
 const activityRewardCooldown = 10 * time.Minute
 
 var (
-	actRewardMu      sync.Mutex
-	actRewardLastAt  = map[string]time.Time{}
+	actRewardMu     sync.Mutex
+	actRewardLastAt = map[string]time.Time{}
 )
 
 // claimOngoingActivityRewardsGo 领取现存活动可领奖励：千星游记、节令小礼、观星礼录、S3 萌宠手记。

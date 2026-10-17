@@ -3,52 +3,46 @@ package ace
 // TSDK / ACE 常量，
 
 const (
-	OfficialVersion  = "v3.8.2.1783066265"
-	OfficialSHA256   = "705e326caad538d6cccb40cb1bd54573525a42d12215c9da9c9c513ec4850a5f"
-	DefaultAppID     = "1112386029"
-	DefaultGameID    = int64(3167)
-	DefaultAppKey    = "0"
-	MergedDataKey    = 1871261153
-	DefaultDataDir   = "/tmp/tsdk"
+	OfficialVersion = "v3.8.2.1783066265"
+	OfficialSHA256  = "705e326caad538d6cccb40cb1bd54573525a42d12215c9da9c9c513ec4850a5f"
+	DefaultAppID    = "1112386029"
+	DefaultGameID   = int64(3167)
+	DefaultAppKey   = "0"
+	MergedDataKey   = 1871261153
+	DefaultDataDir  = "/tmp/tsdk"
 )
 
 // 导出函数符号映射（WASM 导出名）
 var exportsMap = map[string]string{
-	"memory":              "w",
-	"createStats":         "y",
-	"reportUrls":          "z",
-	"createBuffer":        "A",
-	"destroyBuffer":       "B",
-	"getResult":           "C",
-	"reportStackHash":     "D",
-	"sendStatus":          "E",
-	"setFeatureGrayValue": "F",
-	"initRuntime":         "G",
+	"memory":               "w",
+	"createStats":          "y",
+	"reportUrls":           "z",
+	"createBuffer":         "A",
+	"destroyBuffer":        "B",
+	"getResult":            "C",
+	"reportStackHash":      "D",
+	"sendStatus":           "E",
+	"setFeatureGrayValue":  "F",
+	"initRuntime":          "G",
 	"getEncryptedInitInfo": "H",
-	"getMsgLen":           "I",
-	"getMsg":              "J",
-	"checkFuncArray":      "K",
-	"addJsInfo":           "L",
-	"sendHeartbeatTick":   "M",
-	"getDataToServer":     "N",
-	"sendDataFromServer":  "O",
-	"processReceivedData": "P",
-	"sendToGs":            "Q",
-	"sendToGsFast":        "R",
-	"notify":              "S",
-	"notifyUpper":         "T",
-	"generateToken":       "aa",
-	"encryptData":         "ba",
-	"decryptData":         "ca",
-	"encryptDataV2":       "da",
-	"decryptDataV2":       "ea",
-	"detectSpeedHack":     "fa",
-}
-
-var requiredExports = []string{
-	"memory", "createBuffer", "destroyBuffer", "getResult", "initRuntime",
-	"sendHeartbeatTick", "getDataToServer", "sendDataFromServer",
-	"generateToken", "encryptData", "decryptData",
+	"getMsgLen":            "I",
+	"getMsg":               "J",
+	"checkFuncArray":       "K",
+	"addJsInfo":            "L",
+	"sendHeartbeatTick":    "M",
+	"getDataToServer":      "N",
+	"sendDataFromServer":   "O",
+	"processReceivedData":  "P",
+	"sendToGs":             "Q",
+	"sendToGsFast":         "R",
+	"notify":               "S",
+	"notifyUpper":          "T",
+	"generateToken":        "aa",
+	"encryptData":          "ba",
+	"decryptData":          "ca",
+	"encryptDataV2":        "da",
+	"decryptDataV2":        "ea",
+	"detectSpeedHack":      "fa",
 }
 
 // 需要解混淆的内存段 [ptr, length]

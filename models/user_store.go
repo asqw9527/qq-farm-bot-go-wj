@@ -32,24 +32,24 @@ const (
 )
 
 var (
-	users             []User
-	cards             []Card
-	loginAttempts     = make(map[string]LoginAttempt)
-	cardClaimRecords  = make(map[string]CardClaimRecord)
-	userStoreMu       sync.Mutex
-	userDataDir       string
-	cardClaimEnabled  = true
-	userTokens        = make(map[string]time.Time) // token -> expiry
-	userTokenToUsername = make(map[string]string) // token -> username
-	userTokensMu      sync.Mutex
+	users               []User
+	cards               []Card
+	loginAttempts       = make(map[string]LoginAttempt)
+	cardClaimRecords    = make(map[string]CardClaimRecord)
+	userStoreMu         sync.Mutex
+	userDataDir         string
+	cardClaimEnabled    = true
+	userTokens          = make(map[string]time.Time) // token -> expiry
+	userTokenToUsername = make(map[string]string)    // token -> username
+	userTokensMu        sync.Mutex
 )
 
 type LoginAttempt struct {
-	Count        int       `json:"count"`
-	LockedUntil  int64     `json:"lockedUntil,omitempty"`
-	WindowStart  int64     `json:"windowStart"`
-	FirstAttempt int64     `json:"firstAttempt,omitempty"`
-	LastAttempt  int64     `json:"lastAttempt,omitempty"`
+	Count        int   `json:"count"`
+	LockedUntil  int64 `json:"lockedUntil,omitempty"`
+	WindowStart  int64 `json:"windowStart"`
+	FirstAttempt int64 `json:"firstAttempt,omitempty"`
+	LastAttempt  int64 `json:"lastAttempt,omitempty"`
 }
 
 type CardClaimRecord struct {
@@ -60,24 +60,24 @@ type CardClaimRecord struct {
 }
 
 type CardDuration struct {
-	Days         int64   `json:"days"`
-	DurationMs   int64   `json:"durationMs"`
-	IsPermanent  bool    `json:"isPermanent"`
+	Days        int64 `json:"days"`
+	DurationMs  int64 `json:"durationMs"`
+	IsPermanent bool  `json:"isPermanent"`
 }
 
 type Card struct {
-	Code        string    `json:"code"`
-	Description string    `json:"description"`
-	Type        string    `json:"type"` // "time" or "quota"
-	Enabled     bool      `json:"enabled"`
-	UsedBy      string    `json:"usedBy,omitempty"`
-	UsedAt      int64     `json:"usedAt,omitempty"`
-	CreatedAt   int64     `json:"createdAt"`
-	Value       int       `json:"value,omitempty"` // for quota cards
-	Days        int       `json:"days,omitempty"`
-	DurationMs  int64     `json:"durationMs,omitempty"` // duration in milliseconds
-	IsPermanent bool      `json:"isPermanent,omitempty"` // permanent access flag
-	ExpiresAt   int64     `json:"expiresAt,omitempty"`
+	Code        string `json:"code"`
+	Description string `json:"description"`
+	Type        string `json:"type"` // "time" or "quota"
+	Enabled     bool   `json:"enabled"`
+	UsedBy      string `json:"usedBy,omitempty"`
+	UsedAt      int64  `json:"usedAt,omitempty"`
+	CreatedAt   int64  `json:"createdAt"`
+	Value       int    `json:"value,omitempty"` // for quota cards
+	Days        int    `json:"days,omitempty"`
+	DurationMs  int64  `json:"durationMs,omitempty"`  // duration in milliseconds
+	IsPermanent bool   `json:"isPermanent,omitempty"` // permanent access flag
+	ExpiresAt   int64  `json:"expiresAt,omitempty"`
 }
 
 type User struct {
@@ -100,8 +100,8 @@ type AuthResult struct {
 }
 
 type RegisterResult struct {
-	Ok    bool   `json:"ok"`
-	Error string `json:"error,omitempty"`
+	Ok    bool        `json:"ok"`
+	Error string      `json:"error,omitempty"`
 	User  *AuthResult `json:"user,omitempty"`
 }
 
@@ -215,7 +215,7 @@ func loadCardClaimRecords() {
 		return
 	}
 	var wrapper struct {
-		Enabled bool                    `json:"enabled"`
+		Enabled bool                       `json:"enabled"`
 		Records map[string]CardClaimRecord `json:"records"`
 	}
 	if err := json.Unmarshal(data, &wrapper); err != nil {
@@ -305,7 +305,7 @@ func initDefaultAdmin() {
 func checkRateLimit(ip string) (allowed bool, remainingMs int64, message string) {
 	key := fmt.Sprintf("ip:%s", ip)
 	now := time.Now().UnixMilli()
-	
+
 	if attempt, exists := loginAttempts[key]; exists {
 		if attempt.LockedUntil > 0 && attempt.LockedUntil > now {
 			remainingMs = attempt.LockedUntil - now
@@ -339,7 +339,7 @@ func checkRateLimit(ip string) (allowed bool, remainingMs int64, message string)
 func checkAccountLockout(username string) (locked bool, remainingMs int64, message string) {
 	key := fmt.Sprintf("user:%s", username)
 	now := time.Now().UnixMilli()
-	
+
 	if attempt, exists := loginAttempts[key]; exists {
 		if attempt.LockedUntil > 0 && attempt.LockedUntil > now {
 			remainingMs = attempt.LockedUntil - now
@@ -355,7 +355,7 @@ func checkAccountLockout(username string) (locked bool, remainingMs int64, messa
 func recordFailedAttempt(username string) (locked bool, message string) {
 	key := fmt.Sprintf("user:%s", username)
 	now := time.Now().UnixMilli()
-	
+
 	if attempt, exists := loginAttempts[key]; exists {
 		attempt.Count++
 		attempt.LastAttempt = now
@@ -369,9 +369,9 @@ func recordFailedAttempt(username string) (locked bool, message string) {
 		saveLoginAttempts()
 		return false, fmt.Sprintf("用户名或密码错误，剩余尝试次数: %d", loginAttemptsLimit-attempt.Count)
 	}
-	
+
 	loginAttempts[key] = LoginAttempt{
-		Count:       1,
+		Count:        1,
 		FirstAttempt: now,
 		LastAttempt:  now,
 	}
@@ -395,12 +395,12 @@ func ValidateUser(username, password, ip string) (AuthResult, error) {
 	if allowed, _, msg := checkRateLimit(ip); !allowed {
 		return AuthResult{}, errors.New(msg)
 	}
-	
+
 	locked, _, msg := checkAccountLockout(username)
 	if locked {
 		return AuthResult{}, errors.New(msg)
 	}
-	
+
 	var user *User
 	for i := range users {
 		if users[i].Username == username {
@@ -408,12 +408,12 @@ func ValidateUser(username, password, ip string) (AuthResult, error) {
 			break
 		}
 	}
-	
+
 	if user == nil {
 		recordFailedAttempt(username)
 		return AuthResult{}, errors.New("用户名或密码错误")
 	}
-	
+
 	if !verifyPassword(password, user.Password) {
 		locked, msg = recordFailedAttempt(username)
 		if locked {
@@ -421,19 +421,20 @@ func ValidateUser(username, password, ip string) (AuthResult, error) {
 		}
 		return AuthResult{}, errors.New(msg)
 	}
-	
+
 	clearFailedAttempts(username)
-	
+	clearIpAttempts(ip)
+
 	if needsRehash(user.Password) {
 		user.Password = hashPassword(password)
 		saveUsers()
 	}
-	
+
 	limit := user.AccountLimit
 	if limit == 0 {
 		limit = defaultAccountLimit
 	}
-	
+
 	return AuthResult{
 		Username:     user.Username,
 		Role:         user.Role,
@@ -454,11 +455,11 @@ func RegisterUser(username, password, cardCode string) RegisterResult {
 			return RegisterResult{Error: "用户名已存在"}
 		}
 	}
-	
+
 	if errs := validatePasswordStrength(password); len(errs) > 0 {
 		return RegisterResult{Error: errs[0]}
 	}
-	
+
 	// 卡密为必填项，不允许无卡密注册
 	if cardCode == "" {
 		// 检查是否有可用的空闲卡密
@@ -473,7 +474,7 @@ func RegisterUser(username, password, cardCode string) RegisterResult {
 		}
 		return RegisterResult{Error: "请输入卡密"}
 	}
-	
+
 	var card *Card
 	for i := range cards {
 		if cards[i].Code == cardCode {
@@ -481,7 +482,7 @@ func RegisterUser(username, password, cardCode string) RegisterResult {
 			break
 		}
 	}
-	
+
 	if card == nil {
 		return RegisterResult{Error: "卡密不存在"}
 	}
@@ -494,14 +495,14 @@ func RegisterUser(username, password, cardCode string) RegisterResult {
 	if card.Type == "quota" {
 		return RegisterResult{Error: "注册只能使用时间卡密，额度卡密请登录后在续费中使用"}
 	}
-	
+
 	now := time.Now().UnixMilli()
 	durationMs := card.DurationMs
 	if durationMs == 0 {
 		durationMs = 24 * 60 * 60 * 1000 // default 1 day
 	}
 	expiresAt := now + durationMs
-	
+
 	cardCopy := *card
 	cardCopy.UsedBy = username
 	cardCopy.UsedAt = now
@@ -516,16 +517,16 @@ func RegisterUser(username, password, cardCode string) RegisterResult {
 		ExpiresAt:    expiresAt,
 		CreatedAt:    now,
 	}
-	
+
 	// 更新卡密使用状态
 	cards[findCardIndex(cardCode)].UsedBy = username
 	cards[findCardIndex(cardCode)].UsedAt = now
 	cards[findCardIndex(cardCode)].ExpiresAt = expiresAt
-	
+
 	users = append(users, newUser)
 	saveUsers()
 	saveCards()
-	
+
 	return RegisterResult{Ok: true, User: &AuthResult{
 		Username:     newUser.Username,
 		Role:         newUser.Role,
@@ -555,7 +556,7 @@ func RenewUser(username, cardCode string) (bool, string, error) {
 	if user == nil {
 		return false, "", errors.New("用户不存在")
 	}
-	
+
 	var card *Card
 	for i := range cards {
 		if cards[i].Code == cardCode {
@@ -572,9 +573,9 @@ func RenewUser(username, cardCode string) (bool, string, error) {
 	if card.UsedBy != "" {
 		return false, "", errors.New("卡密已被使用")
 	}
-	
+
 	now := time.Now().UnixMilli()
-	
+
 	msg := "续费成功"
 	if card.Type == "quota" {
 		add := card.Value
@@ -674,27 +675,27 @@ func ClaimCardByUA(ua, username string) CardClaimResult {
 	if !cardClaimEnabled {
 		return CardClaimResult{Error: "卡密领取功能未开启"}
 	}
-	
+
 	uaHash := fmt.Sprintf("%x", sha256.Sum256([]byte(ua)))
-	
+
 	if record, exists := cardClaimRecords[uaHash]; exists {
 		if time.Now().UnixMilli()-record.ClaimTime < 86400000 {
 			remaining := 86400000 - (time.Now().UnixMilli() - record.ClaimTime)
 			return CardClaimResult{Error: fmt.Sprintf("您已经在24小时内领取过一次卡密了！还剩 %d 秒", remaining/1000)}
 		}
 	}
-	
+
 	var availableCards []Card
 	for _, c := range cards {
 		if c.Type == "time" && c.UsedBy == "" && c.Enabled {
 			availableCards = append(availableCards, c)
 		}
 	}
-	
+
 	if len(availableCards) == 0 {
 		return CardClaimResult{Error: "卡密库存不足，请联系管理员！"}
 	}
-	
+
 	cardClaimRecords[uaHash] = CardClaimRecord{
 		UAHash:    uaHash,
 		ClaimTime: time.Now().UnixMilli(),
@@ -702,7 +703,7 @@ func ClaimCardByUA(ua, username string) CardClaimResult {
 		Username:  username,
 	}
 	saveCardClaimRecords()
-	
+
 	return CardClaimResult{
 		Ok:         true,
 		CardCode:   availableCards[0].Code,
@@ -778,10 +779,10 @@ func GetUserByToken(tok string) *User {
 	if tok == "" {
 		return nil
 	}
-	
+
 	userTokensMu.Lock()
 	defer userTokensMu.Unlock()
-	
+
 	exp, ok := userTokens[tok]
 	if !ok {
 		return nil
@@ -791,12 +792,12 @@ func GetUserByToken(tok string) *User {
 		delete(userTokenToUsername, tok)
 		return nil
 	}
-	
+
 	username, ok := userTokenToUsername[tok]
 	if !ok {
 		return nil
 	}
-	
+
 	for i := range users {
 		if users[i].Username == username {
 			return &users[i]
@@ -892,7 +893,7 @@ func AdminChangeUserPassword(username, newPassword string) error {
 func GetAllCards() []Card {
 	userStoreMu.Lock()
 	defer userStoreMu.Unlock()
-	
+
 	result := make([]Card, len(cards))
 	copy(result, cards)
 	return result
@@ -902,18 +903,18 @@ func GetAllCards() []Card {
 func GenerateCards(count int, description string, durationMs int64) ([]string, error) {
 	userStoreMu.Lock()
 	defer userStoreMu.Unlock()
-	
+
 	if count <= 0 || count > 1000 {
 		return nil, errors.New("生成数量必须在 1-1000 之间")
 	}
-	
+
 	codes := make([]string, count)
 	now := time.Now().UnixMilli()
 	days := 0
 	if durationMs > 0 {
 		days = int(durationMs / (24 * 60 * 60 * 1000))
 	}
-	
+
 	for i := 0; i < count; i++ {
 		code := generateCardCode()
 		card := Card{
@@ -929,7 +930,7 @@ func GenerateCards(count int, description string, durationMs int64) ([]string, e
 		cards = append(cards, card)
 		codes[i] = code
 	}
-	
+
 	saveCards()
 	return codes, nil
 }
@@ -1059,7 +1060,7 @@ func UserExpired(user *User) bool {
 func ToggleCards(codes []string, enabled bool) {
 	userStoreMu.Lock()
 	defer userStoreMu.Unlock()
-	
+
 	for _, code := range codes {
 		for i := range cards {
 			if cards[i].Code == code {
@@ -1068,7 +1069,7 @@ func ToggleCards(codes []string, enabled bool) {
 			}
 		}
 	}
-	
+
 	saveCards()
 }
 

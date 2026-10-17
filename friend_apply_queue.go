@@ -156,7 +156,8 @@ func (q *applyQueue) enqueue(gid int64, openID, shareKey string) string {
 }
 
 // cancel 立即移除选中项（任何状态），并调用在途请求的 cancel 函数中止发送。
-//  worker 对在途被取消的项不写日志、不计入结果，因此点取消后日志立刻停止。
+//
+//	worker 对在途被取消的项不写日志、不计入结果，因此点取消后日志立刻停止。
 func (q *applyQueue) cancel(gids []string) int {
 	q.mu.Lock()
 	defer q.mu.Unlock()

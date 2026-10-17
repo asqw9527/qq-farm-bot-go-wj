@@ -109,8 +109,6 @@ func NewReader(buf []byte) *Reader { return &Reader{buf: buf} }
 // More 是否还有未读
 func (r *Reader) More() bool { return r.pos < len(r.buf) }
 
-func (r *Reader) error() error { return nil } // 简化：越界返回空
-
 // ReadVarint 读 varint（越界安全：pos 到缓冲区末尾即停，不再 panic）
 // 【2026-08-20 修复】原实现 r.buf[r.pos] 无边界检查：服务端推送损坏/未知字段导致
 // pos 越界后，下一次 ReadVarint 直接 panic 拖垮整个进程（DecodeItemNotify 实崩案例）。

@@ -31,6 +31,8 @@ var imageAssetRe = regexp.MustCompile(`(Crop_\d+)_Seed\.(?:png|jpg|jpeg|webp|gif
 //   - 按文件名中的 Crop_X_Seed 建立 assetName → URL
 //   - 另外递归扫描 mutant/ 子目录（变异作物图片）
 func InitImageMap(gameConfigDir string) {
+	cfgMu.Lock()
+	defer cfgMu.Unlock()
 	dir := filepath.Join(gameConfigDir, "seed_images_named")
 	itemImageMap = make(map[int]string)
 	seedAssetImageMap = make(map[string]string)
@@ -92,6 +94,8 @@ func scanImageDir(dir, urlPrefix string) {
 // tryGetImage 先按 id 查 itemImageMap，未命中再从 ItemInfo.asset_name → seedAssetImageMap 回退。
 // 若仍未命中，尝试通过 assetNameAliases 找到同源图片。
 func tryGetImage(id int) string {
+	cfgMu.RLock()
+	defer cfgMu.RUnlock()
 	if u, ok := itemImageMap[id]; ok && u != "" {
 		return u
 	}
@@ -110,8 +114,8 @@ func tryGetImage(id int) string {
 }
 
 // GetItemImageURL 返回 itemId 对应图片URL，
-//   1. 直接查 id / asset_name
-//   2. itemId 为果实 id 时，用 plant.seed_id 换算后再查
+//  1. 直接查 id / asset_name
+//  2. itemId 为果实 id 时，用 plant.seed_id 换算后再查
 func GetItemImageURL(itemID int) string {
 	if u := tryGetImage(itemID); u != "" {
 		return urlEncodePath(u)

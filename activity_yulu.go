@@ -64,7 +64,9 @@ func yuluItemNameOf(id int64) string {
 
 // ===== 气象研究（tech_tree 分叉研究树，领取接口已抓包实锤 2026-08-26） =====
 // 领取：ActivityService.Operate({ id:2026070304, cmd:40,
-//        tech_tree_submit_node{ node_id: 档位号 } })  -- proto: field140{sub field1=node_id}
+//
+//	tech_tree_submit_node{ node_id: 档位号 } })  -- proto: field140{sub field1=node_id}
+//
 // 服务端失败语义：node_id 起点 → "雷电徽章不足"；有前置未领取 → "节点未解锁"。
 const (
 	yuluResearchNodeID   = 2026070304 // 气象研究子节点 id（雨落成诗 0300 根下）
@@ -100,7 +102,7 @@ const (
 // yuluResearchTier 一个气象研究档位（研究树节点）。
 // 分叉依赖见 Prevs：该档位需把全部前置档位领取后才可领取（服务端返回"节点未解锁"兜底）。
 type yuluResearchTier struct {
-	NodeID   int64   `json:"nodeId"`  // 研究节点 id（提交给 cmd=40 的 node_id）
+	NodeID   int64   `json:"nodeId"`   // 研究节点 id（提交给 cmd=40 的 node_id）
 	RewardID int64   `json:"rewardId"` // 奖励物品 id
 	Reward   string  `json:"reward"`   // 奖励展示名
 	Count    int64   `json:"count"`    // 奖励数量
@@ -110,7 +112,8 @@ type yuluResearchTier struct {
 
 // yuluResearchTree 气象研究 9 档（开服抓包 0304·field118 实锤：档位号=node_id、消耗1027、奖励）。
 // 树形：1000(起点·天气采集瓶)→1001(化肥礼包)→[1002青蛙,1003乌云]→[1004雷雨,1005有机化肥]
-//       →[1006闪电感应,1007闪电感应]→1008(终点头像框)。
+//
+//	→[1006闪电感应,1007闪电感应]→1008(终点头像框)。
 var yuluResearchTree = []yuluResearchTier{
 	{NodeID: 1000, RewardID: yuluItemCollect, Reward: "天气采集瓶", Count: 1, Cost: 20, Prevs: nil},
 	{NodeID: 1001, RewardID: 100003, Reward: "化肥礼包", Count: 5, Cost: 40, Prevs: []int64{1000}},
@@ -286,7 +289,7 @@ func handleYuluOpen(w http.ResponseWriter, r *http.Request) {
 	}
 	accountID := resolveAccountIDWithOwner(r, r.URL.Query().Get("accountId"))
 	if req.AccountID != "" {
-		accountID = req.AccountID
+		accountID = resolveAccountIDWithOwner(r, req.AccountID)
 	}
 	if accountID == "" {
 		writeJSONMap(w, "ok", false, "error", "缺少 accountId")
@@ -329,7 +332,7 @@ func handleYuluMutate(w http.ResponseWriter, r *http.Request) {
 	}
 	accountID := resolveAccountIDWithOwner(r, r.URL.Query().Get("accountId"))
 	if req.AccountID != "" {
-		accountID = req.AccountID
+		accountID = resolveAccountIDWithOwner(r, req.AccountID)
 	}
 	if accountID == "" {
 		writeJSONMap(w, "ok", false, "error", "缺少 accountId")
@@ -393,7 +396,8 @@ func handleYuluMutate(w http.ResponseWriter, r *http.Request) {
 // 5002 雷雨召唤瓶：自家，plain Use（无 land，host_gid=0）。
 // 5005 青蛙使坏瓶：农场级事件，target 只带 host_gid（无 land_ids），整农场触发一次。
 // 5001/5004/5006：好友向，Enter 好友 + AllLands + Use{ item{id,count,uid}, target{host_gid, land_ids} }；
-//   5001 采集走 Operate（雷雨好友才可收集，服务端校验）；5006 乌云目标限生长中地块。
+//
+//	5001 采集走 Operate（雷雨好友才可收集，服务端校验）；5006 乌云目标限生长中地块。
 func handleYuluUse(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		AccountID string  `json:"accountId"`
@@ -407,7 +411,7 @@ func handleYuluUse(w http.ResponseWriter, r *http.Request) {
 	}
 	accountID := resolveAccountIDWithOwner(r, r.URL.Query().Get("accountId"))
 	if req.AccountID != "" {
-		accountID = req.AccountID
+		accountID = resolveAccountIDWithOwner(r, req.AccountID)
 	}
 	if accountID == "" {
 		writeJSONMap(w, "ok", false, "error", "缺少 accountId")
@@ -619,7 +623,7 @@ func handleYuluResearch(w http.ResponseWriter, r *http.Request) {
 	}
 	accountID := resolveAccountIDWithOwner(r, r.URL.Query().Get("accountId"))
 	if req.AccountID != "" {
-		accountID = req.AccountID
+		accountID = resolveAccountIDWithOwner(r, req.AccountID)
 	}
 	if accountID == "" {
 		writeJSONMap(w, "ok", false, "error", "缺少 accountId")
@@ -643,10 +647,10 @@ func handleYuluResearch(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]interface{}{
 		"ok": true, "account": accountID,
 		"data": map[string]interface{}{
-			"nodeId":         req.NodeID,
-			"reward":         tier.Reward,
-			"count":          tier.Count,
-			"rewards":        rewards,
+			"nodeId":          req.NodeID,
+			"reward":          tier.Reward,
+			"count":           tier.Count,
+			"rewards":         rewards,
 			"unlockedNodeIds": yuluResearchUnlocked(body),
 		},
 	})

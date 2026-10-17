@@ -25,7 +25,7 @@ type ShopInfoReply struct {
 	GoodsList []GoodsInfo
 }
 
-// EncodeShopInfoRequest 
+// EncodeShopInfoRequest
 func EncodeShopInfoRequest(shopID int64) []byte {
 	b := NewBuilder()
 	b.FieldInt64(1, shopID)
@@ -95,8 +95,8 @@ func decodeGoodsInfo(buf []byte) GoodsInfo {
 
 // BuyGoodsReply 购买商品回复
 type BuyGoodsReply struct {
-	Goods    GoodsInfo
-	GetItems []ItemChange
+	Goods     GoodsInfo
+	GetItems  []ItemChange
 	CostItems []ItemChange
 }
 

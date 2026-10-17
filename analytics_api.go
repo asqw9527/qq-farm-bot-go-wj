@@ -167,27 +167,27 @@ func getPlantRankings(sortBy string) []map[string]interface{} {
 		}
 
 		rankings = append(rankings, map[string]interface{}{
-			"id":                               plant.ID,
-			"seedId":                           plant.SeedID,
-			"name":                             itemNameAliases[plant.SeedID], // 优先使用别名显示
-			"seasons":                          seasons,
-			"level":                            levelOrNull,
-			"growTime":                         effectiveGrowTime,
-			"growTimeStr":                      formatGrowTimeSec(effectiveGrowTime),
-			"reduceSec":                        reduceSec,
-			"reduceSecApplied":                 reduceSecApplied,
-			"expPerHour":                       round2(expPerHour),
-			"normalFertilizerExpPerHour":       round2(normalFertilizerExpPerHour),
-			"goldPerHour":                      round2(goldPerHour),
-			"profitPerHour":                    round2(profitPerHour),
-			"normalFertilizerProfitPerHour":    round2(fertProfitPerHour),
-			"income":                           income,
-			"netProfit":                        netProfit,
-			"fruitId":                          fruitID,
-			"fruitCount":                       fruitCountPerHarvest,
-			"fruitPrice":                       fruitPrice,
-			"seedPrice":                        seedPrice,
-			"image":                            getItemImageByID(plant.SeedID),
+			"id":                            plant.ID,
+			"seedId":                        plant.SeedID,
+			"name":                          itemNameAliases[plant.SeedID], // 优先使用别名显示
+			"seasons":                       seasons,
+			"level":                         levelOrNull,
+			"growTime":                      effectiveGrowTime,
+			"growTimeStr":                   formatGrowTimeSec(effectiveGrowTime),
+			"reduceSec":                     reduceSec,
+			"reduceSecApplied":              reduceSecApplied,
+			"expPerHour":                    round2(expPerHour),
+			"normalFertilizerExpPerHour":    round2(normalFertilizerExpPerHour),
+			"goldPerHour":                   round2(goldPerHour),
+			"profitPerHour":                 round2(profitPerHour),
+			"normalFertilizerProfitPerHour": round2(fertProfitPerHour),
+			"income":                        income,
+			"netProfit":                     netProfit,
+			"fruitId":                       fruitID,
+			"fruitCount":                    fruitCountPerHarvest,
+			"fruitPrice":                    fruitPrice,
+			"seedPrice":                     seedPrice,
+			"image":                         getItemImageByID(plant.SeedID),
 		})
 	}
 

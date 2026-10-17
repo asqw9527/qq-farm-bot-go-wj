@@ -50,12 +50,11 @@ func registerActivityAPI(api *http.ServeMux) {
 
 	// 雨落成诗（WeatherBottleUI）：状态读背包、开箱/召唤/使用/变异、气象研究占位
 	api.HandleFunc("/api/activity/yulu", handleYuluStatus)
-	api.HandleFunc("/api/activity/yulu/open", handleYuluOpen)       // 5007/5008 开箱
-	api.HandleFunc("/api/activity/yulu/mutate", handleYuluMutate)   // 5003 闪电变异（自家）
-	api.HandleFunc("/api/activity/yulu/use", handleYuluUse)         // 5001/5002/5004/5005/5006 使用
-	api.HandleFunc("/api/activity/yulu/research", handleYuluResearch)  // 气象研究领奖
-	api.HandleFunc("/api/activity/yulu/exchange", handleYuluExchange)  // 兑换收集天气瓶（金豆→5001，每日1个）
-	api.HandleFunc("/api/debug/item_use", handleDebugItemUse)
+	api.HandleFunc("/api/activity/yulu/open", handleYuluOpen)         // 5007/5008 开箱
+	api.HandleFunc("/api/activity/yulu/mutate", handleYuluMutate)     // 5003 闪电变异（自家）
+	api.HandleFunc("/api/activity/yulu/use", handleYuluUse)           // 5001/5002/5004/5005/5006 使用
+	api.HandleFunc("/api/activity/yulu/research", handleYuluResearch) // 气象研究领奖
+	api.HandleFunc("/api/activity/yulu/exchange", handleYuluExchange) // 兑换收集天气瓶（金豆→5001，每日1个）
 
 	api.HandleFunc("/api/activity/pet/operate", handleActivityPetOperate) // S3 萌宠：投喂/寻宝/领手记/领狗/种子礼包/兑换
 	api.HandleFunc("/api/activity/pet", handleActivityPet)                // S3 萌宠：比熊之家 + 爪印手记状态
@@ -169,16 +168,16 @@ func handleActivityList(w http.ResponseWriter, r *http.Request) {
 		upcoming := it.EndTime > 0 && it.StartTime > now
 		finished := it.EndTime > 0 && it.EndTime < now
 		show := false
-	switch scope {
-	case "all", "default":
-		show = true
-	case "ongoing":
-		show = ongoing
-	case "upcoming":
-		show = upcoming
-	case "finished":
-		show = finished
-	}
+		switch scope {
+		case "all", "default":
+			show = true
+		case "ongoing":
+			show = ongoing
+		case "upcoming":
+			show = upcoming
+		case "finished":
+			show = finished
+		}
 		if !show {
 			continue
 		}
@@ -547,25 +546,6 @@ const (
 	actExchangeCmd   = 1          // 兑换命令（HELU_EXCHANGE_CMD）
 )
 
-// starSandBalance 查询账号背包中星砂(1023)数量
-func starSandBalance(ctx context.Context, accountID string) int64 {
-	c, err := clientPool.Get(accountID)
-	if err != nil {
-		return 0
-	}
-	rep, err := c.Request(ctx, "gamepb.itempb.ItemService", "Bag", proto.EncodeBagRequest(), 12*time.Second)
-	if err != nil {
-		return 0
-	}
-	br := proto.DecodeBagReply(rep.Body)
-	for _, it := range br.Items {
-		if it.ID == actStarSandID && it.Count > 0 {
-			return it.Count
-		}
-	}
-	return 0
-}
-
 // actFindShopItems 遍历分组树找第一个含 exchange_shop 的节点
 func actFindShopItems(node *ActivityNode) []*ShopItem {
 	if node == nil {
@@ -798,27 +778,28 @@ func handleActivityShopExchange(w http.ResponseWriter, r *http.Request) {
 }
 
 // ===== 青梅酿万金（青酿换万金）：领种子 + 酿酒出售 =====
-//  领种子：Operate cmd=4  qingmei_claim_params{type:2}
-//  酿酒   ：Operate cmd=14(预览 qingmei_wine_start) / 15(精酿 qingmei_wine_brew{}) / 16(出售 qingmei_wine_sell{multiple})
+//
+//	领种子：Operate cmd=4  qingmei_claim_params{type:2}
+//	酿酒   ：Operate cmd=14(预览 qingmei_wine_start) / 15(精酿 qingmei_wine_brew{}) / 16(出售 qingmei_wine_sell{multiple})
 const (
-	qingmeiSeedItemID    = 21221 // 青梅种子
-	qingmeiFruitItemID   = 41221 // 青梅（酿制材料）
+	qingmeiSeedItemID  = 21221 // 青梅种子
+	qingmeiFruitItemID = 41221 // 青梅（酿制材料）
 	// 青梅活动固定 ID
 	qingmeiRootActivityID  = 2026081200
 	qingmeiClaimActivityID = 2026081201
 	qingmeiWineActivityID  = 2026081202
-	qingmeiSeedReward    = 24    // 每次领取种子数
-	qingmeiClaimCmd      = 4
-	qingmeiPreviewCmd    = 14
-	qingmeiBrewCmd       = 15
-	qingmeiSellCmd       = 16
-	qingmeiBrewSteps     = 3
-	qingmeiStepDelay     = 1 * time.Second
+	qingmeiSeedReward      = 24 // 每次领取种子数
+	qingmeiClaimCmd        = 4
+	qingmeiPreviewCmd      = 14
+	qingmeiBrewCmd         = 15
+	qingmeiSellCmd         = 16
+	qingmeiBrewSteps       = 3
+	qingmeiStepDelay       = 1 * time.Second
 	// OperateRequest 请求字段编号（activitypb.proto）
-	qingmeiClaimParamF   = 103
-	qingmeiWineStartF    = 112
-	qingmeiWineBrewF     = 113
-	qingmeiWineSellF     = 114
+	qingmeiClaimParamF = 103
+	qingmeiWineStartF  = 112
+	qingmeiWineBrewF   = 113
+	qingmeiWineSellF   = 114
 	// OperateReply 回包字段编号
 	qingmeiClaimReplyF   = 104
 	qingmeiPreviewReplyF = 113
@@ -988,13 +969,13 @@ func handleQingmei(w http.ResponseWriter, r *http.Request) {
 		"ok": true, "account": accountID,
 		"title": "青酿换万金",
 		"activity": map[string]interface{}{
-			"activity_id": rootID,
+			"activity_id":       rootID,
 			"claim_activity_id": claimID,
-			"wine_activity_id": wineID,
-			"wine_title": wineTitle,
-			"start_time": startTime,
-			"end_time": endTime,
-			"status": claimStatus, "claimed": claimed, "claimable": claimable,
+			"wine_activity_id":  wineID,
+			"wine_title":        wineTitle,
+			"start_time":        startTime,
+			"end_time":          endTime,
+			"status":            claimStatus, "claimed": claimed, "claimable": claimable,
 		},
 		"reward": map[string]interface{}{
 			"item_id": qingmeiSeedItemID, "item_count": qingmeiSeedReward,
@@ -1105,10 +1086,10 @@ func handleQingmeiWine(w http.ResponseWriter, r *http.Request) {
 
 	// 精酿多次
 	type brewRes struct {
-		WineType int64 `json:"wine_type"`
-		Cost     int64 `json:"cost"`
-		Price    int64 `json:"price"`
-		CanDouble bool `json:"can_double"`
+		WineType  int64 `json:"wine_type"`
+		Cost      int64 `json:"cost"`
+		Price     int64 `json:"price"`
+		CanDouble bool  `json:"can_double"`
 	}
 	var brews []*brewRes
 	for i := 0; i < qingmeiBrewSteps; i++ {
@@ -1210,16 +1191,21 @@ func handleQingmeiWine(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]interface{}{
 		"ok": true, "account": accountID,
 		"before_material": beforeTotal, "after_material": afterTotal,
-		"consumed": max64(0, beforeTotal-afterTotal),
+		"consumed":   max64(0, beforeTotal-afterTotal),
 		"brew_steps": len(brews), "brews": brews,
 		"preview": map[string]int64{"price": previewPrice}, "preview_warning": previewWarning,
-		"wine": finalBrew,
+		"wine":   finalBrew,
 		"shared": shared,
-		"sell": sell,
+		"sell":   sell,
 	})
 }
 
-func max64(a, b int64) int64 { if a > b { return a }; return b }
+func max64(a, b int64) int64 {
+	if a > b {
+		return a
+	}
+	return b
+}
 
 // ===== 活动 GetGroup 短缓存 =====
 // 游戏 GetGroup 返回整棵活动树，量大且相对稳定；每次切页/取状态都重拉容易把 RPC 链路拖垮导致超时。
@@ -1441,7 +1427,7 @@ func handleQiXiSpray(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
 	if req.AccountID != "" {
-		accountID = req.AccountID
+		accountID = resolveAccountIDWithOwner(r, req.AccountID)
 	}
 	if accountID == "" {
 		writeJSONMap(w, "ok", false, "error", "缺少 accountId")
@@ -1468,19 +1454,14 @@ func handleQiXiSpray(w http.ResponseWriter, r *http.Request) {
 		writeJSONMap(w, "ok", false, "error", "GRPC:"+err.Error())
 		return
 	}
-	allLandsHex := fmt.Sprintf("%X", rep.Body) // 临时调试
 	lands := proto.DecodeAllLandsReply(rep.Body).Lands
 	want := map[int64]bool{}
 	for _, id := range req.LandIDs {
 		want[id] = true
 	}
 	var selected []int64
-	var landDebug []map[string]interface{}
 	for _, l := range lands {
 		hasCrop := l.Plant != nil && len(l.Plant.Phases) > 0
-		landDebug = append(landDebug, map[string]interface{}{
-			"id": l.ID, "size": l.LandSize, "master": l.MasterLandID, "slaves": l.SlaveLandIDs, "crop": hasCrop,
-		})
 		if !hasCrop {
 			continue
 		}
@@ -1550,10 +1531,7 @@ func handleQiXiSpray(w http.ResponseWriter, r *http.Request) {
 			"sprayCount":  len(sprayed),
 			"featherGain": len(sprayed), // 每块 +1 鹊羽
 			"errors":      errs,
-			"luUID":       luUID, // 临时调试：灵露实例 uid
 			"selected":    selected,
-			"lands":       landDebug, // 临时调试：地块结构
-			"allLandsHex": allLandsHex, // 临时调试：AllLands 原始字节
 		},
 	})
 }
@@ -1570,7 +1548,7 @@ func handleQiXiBridge(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
 	if req.AccountID != "" {
-		accountID = req.AccountID
+		accountID = resolveAccountIDWithOwner(r, req.AccountID)
 	}
 	if accountID == "" {
 		writeJSONMap(w, "ok", false, "error", "缺少 accountId")
@@ -1607,7 +1585,7 @@ func handleQiXiGift(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
 	if req.AccountID != "" {
-		accountID = req.AccountID
+		accountID = resolveAccountIDWithOwner(r, req.AccountID)
 	}
 	if accountID == "" || req.HostGID <= 0 {
 		writeJSONMap(w, "ok", false, "error", "缺少 accountId/hostGid")
@@ -1646,8 +1624,8 @@ func handleQiXiGift(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]interface{}{
 		"ok": true, "account": accountID,
 		"data": map[string]interface{}{
-			"giftTo": req.HostGID,
-			"msg":    "香囊赠送成功",
+			"giftTo":  req.HostGID,
+			"msg":     "香囊赠送成功",
 			"rewards": rewards,
 		},
 	})
@@ -1716,94 +1694,6 @@ func qixiItemName(id int64) string {
 }
 
 // ===== 临时调试：ItemService.Use 探测（灵露喷洒=放黄金虫=使用物品到地块）=====
-// GET /api/debug/item_use?accountId=X&item=..&count=..&land_id=..&land_field=3&shape=nested|flat
-func handleDebugItemUse(w http.ResponseWriter, r *http.Request) {
-	accountID := resolveAccountIDWithOwner(r, r.URL.Query().Get("accountId"))
-	item, _ := strconv.ParseInt(r.URL.Query().Get("item"), 10, 64)
-	count, _ := strconv.ParseInt(r.URL.Query().Get("count"), 10, 64)
-	landID, _ := strconv.ParseInt(r.URL.Query().Get("land_id"), 10, 64)
-	hostGID, _ := strconv.ParseInt(r.URL.Query().Get("host_gid"), 10, 64)
-	lfield, _ := strconv.Atoi(r.URL.Query().Get("land_field"))
-	if lfield == 0 {
-		lfield = 3
-	}
-	hfield, _ := strconv.Atoi(r.URL.Query().Get("host_field"))
-	if hfield == 0 {
-		hfield = 4
-	}
-	shape := r.URL.Query().Get("shape")
-	layout := r.URL.Query().Get("layout")
-	uid, _ := strconv.ParseInt(r.URL.Query().Get("uid"), 10, 64)
-	if item <= 0 {
-		writeError(w, 400, "missing item")
-		return
-	}
-	if count <= 0 {
-		count = 1
-	}
-	var body []byte
-	if layout == "social" { // PutSocialItem 风格平铺: host_gid=1, land_ids=2, item_id=3, count=4
-		b := proto.NewBuilder()
-		if hostGID > 0 {
-			b.FieldInt64(1, hostGID)
-		}
-		if landID > 0 {
-			b.FieldInt64(2, landID)
-		}
-		b.FieldInt64Always(3, item)
-		b.FieldInt64Always(4, count)
-		body = b.Bytes()
-	} else if shape == "flat" {
-		b := proto.NewBuilder()
-		b.FieldInt64(1, item)
-		b.FieldInt64(2, count)
-		if landID > 0 {
-			b.FieldInt64(lfield, landID)
-		}
-		if hostGID > 0 {
-			b.FieldInt64(hfield, hostGID)
-		}
-		if uid > 0 {
-			b.FieldInt64(6, uid)
-		}
-		body = b.Bytes()
-	} else { // nested: 外层 field1=子消息{item,count,land@lfield,host@hfield,uid@6}
-		sub := proto.NewBuilder()
-		sub.FieldInt64Always(1, item)
-		sub.FieldInt64Always(2, count)
-		if landID > 0 {
-			sub.FieldInt64(lfield, landID)
-		}
-		if hostGID > 0 {
-			sub.FieldInt64(hfield, hostGID)
-		}
-		if uid > 0 {
-			sub.FieldInt64(6, uid)
-		}
-		b := proto.NewBuilder()
-		b.FieldMessage(1, sub.Bytes())
-		body = b.Bytes()
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
-	defer cancel()
-	c, err := clientPool.Get(accountID)
-	if err != nil {
-		writeJSONMap(w, "ok", false, "error", err.Error())
-		return
-	}
-	rep, err := c.Request(ctx, "gamepb.itempb.ItemService", "Use", body, 15*time.Second)
-	if err != nil {
-		writeJSONMap(w, "ok", false, "error", "GRPC:"+err.Error(), "hex", fmt.Sprintf("%X", body))
-		return
-	}
-	writeJSON(w, map[string]interface{}{"ok": true, "hex": fmt.Sprintf("%X", body), "bodyLen": len(rep.Body), "respHex": fmt.Sprintf("%X", rep.Body)})
-}
-
-// actOperateWithEmptyExt Operate{f1=id, f2=cmd, f<cmd+99>={}}，空扩展块必带。
-func actOperateWithEmptyExt(ctx context.Context, accountID string, activityID, cmd int64) ([]byte, error) {
-	return actOperateClaim(ctx, accountID, activityID, cmd, int(cmd)+honghuaExtBase, nil)
-}
-
 func actOperateClaim(ctx context.Context, accountID string, activityID, cmd int64, extField int, ext []byte) ([]byte, error) {
 	b := proto.NewBuilder()
 	b.FieldInt64(1, activityID)

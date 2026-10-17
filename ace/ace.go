@@ -404,7 +404,6 @@ func (r *Runtime) free(ptr uint32) {
 
 func (r *Runtime) fn(symbol string) api.Function { return r.mod.ExportedFunction(symbol) }
 
-
 // Ready 是否初始化完成
 func (r *Runtime) Ready() bool { return r.ready }
 

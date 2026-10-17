@@ -19,7 +19,7 @@ import (
 // 游戏商店操作禁止并发的风控约束）。
 
 const (
-	mysteryAutoBuyIntervalMs  = 60 * time.Minute
+	mysteryAutoBuyInterval    = 60 * time.Minute
 	mysteryAutoBuyMaxPerCycle = 20
 	mysteryAutoBuyBuyTimeout  = 15 * time.Second
 	mysteryAutoBuyStepDelay   = 500 * time.Millisecond
@@ -37,7 +37,7 @@ func startMysteryAutoBuyLoop(ctx context.Context) {
 			return
 		}
 		runMysteryAutoBuyRound(ctx)
-		t := time.NewTicker(mysteryAutoBuyIntervalMs)
+		t := time.NewTicker(mysteryAutoBuyInterval)
 		defer t.Stop()
 		for {
 			select {

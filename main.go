@@ -3,17 +3,20 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	goembed "embed"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	goembed "embed"
 	"io/fs"
 	"log"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"os/signal"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 
 	"github.com/Aoluis1005/go-farm-bot/models"
@@ -26,6 +29,7 @@ var dataDir string
 // 注意：必须用 all: 前缀，否则 embed 默认跳过文件名以 _ 或 . 开头的文件；
 // Vite 产出的共享块 _plugin-vue_export-helper-*.js 以 _ 开头，漏嵌会导致该块
 // 线上返回 index.html(content-type=text/html) → 浏览器解析模块报错 → 整页黑屏。
+//
 //go:embed all:web/dist
 var webDistFS goembed.FS
 
@@ -109,6 +113,9 @@ func main() {
 		}
 	}()
 
+	// 注册经验上限持久化回调（经验满/跨日重置时按账号持久化标志）
+	initExpLimitPersistence()
+
 	// 启动所有账号的自动化引擎
 	startAllAutomation()
 
@@ -118,7 +125,12 @@ func main() {
 
 	corsHandler := func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Access-Control-Allow-Origin", "*")
+			// 收紧 CORS：仅回显同源（含 localhost 开发）的 Origin，不再对任意站点放开 "*"。
+			// 面板使用自定义 token 头鉴权，同源部署无需通配。
+			if origin := r.Header.Get("Origin"); origin != "" && corsOriginAllowed(origin, r.Host) {
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+				w.Header().Add("Vary", "Origin")
+			}
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, x-account-id, x-admin-token, x-user-token")
 			if r.Method == "OPTIONS" {
@@ -161,12 +173,11 @@ func main() {
 			http.Error(w, "YYB 服务未就绪", http.StatusServiceUnavailable)
 			return
 		}
-		target, err := url.Parse(embeddedYybBaseURL)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+		proxy := qrReverseProxy(embeddedYybBaseURL)
+		if proxy == nil {
+			http.Error(w, "YYB 服务地址无效", http.StatusInternalServerError)
 			return
 		}
-		proxy := httputil.NewSingleHostReverseProxy(target)
 		r.URL.Path = strings.TrimPrefix(r.URL.Path, "/qr")
 		proxy.ServeHTTP(w, r)
 	}))
@@ -201,14 +212,83 @@ func main() {
 	})
 
 	addr := fmt.Sprintf("0.0.0.0:%d", adminPort)
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 15 * time.Second, // 防慢速请求头（slowloris）
+		ReadTimeout:       90 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		// 不设 WriteTimeout：部分管理接口（配置/素材同步）单次处理可能较长，
+		// 其内部已由 adminAuthMiddleware 注入 120s context 超时兜底。
+	}
 	log.Printf("[admin] QQ Farm Bot Go · http://localhost:%d", adminPort)
-	if err := http.ListenAndServe(addr, mux); err != nil {
+
+	// 优雅退出：收到 SIGINT/SIGTERM 后停止接收新连接并等待在途请求结束。
+	shutdownDone := make(chan struct{})
+	go func() {
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+		<-sigCh
+		log.Printf("[admin] 收到退出信号，开始优雅关闭…")
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(ctx); err != nil {
+			log.Printf("[admin] 优雅关闭超时: %v", err)
+		}
+		close(shutdownDone)
+	}()
+
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("[admin] failed to start: %v", err)
 	}
-	// 主循环退出时（正常路径 main 不会返回）关闭内置 YYB 服务
+	<-shutdownDone
+	// 主循环退出后关闭内置 YYB 服务
 	if embeddedYybClose != nil {
 		_ = embeddedYybClose()
 	}
+}
+
+// qr 反向代理缓存：内嵌 YYB 服务地址固定后复用同一 ReverseProxy，
+// 避免每个请求都新建（含独立 Transport），并消除并发重建竞争。
+var (
+	qrProxyMu  sync.Mutex
+	qrProxyURL string
+	qrProxy    *httputil.ReverseProxy
+)
+
+func qrReverseProxy(target string) *httputil.ReverseProxy {
+	qrProxyMu.Lock()
+	defer qrProxyMu.Unlock()
+	if qrProxy != nil && qrProxyURL == target {
+		return qrProxy
+	}
+	u, err := url.Parse(target)
+	if err != nil {
+		return nil
+	}
+	qrProxy = httputil.NewSingleHostReverseProxy(u)
+	qrProxyURL = target
+	return qrProxy
+}
+
+// corsOriginAllowed 仅允许同源 Origin（含 localhost 开发与平台预览域名）。
+func corsOriginAllowed(origin, host string) bool {
+	u, err := url.Parse(origin)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	if strings.EqualFold(u.Host, host) {
+		return true
+	}
+	h := u.Hostname()
+	if h == "localhost" || h == "127.0.0.1" {
+		return true
+	}
+	// 平台在线预览域名（预览代理可能改写 Host，需按域名后缀放行）
+	if strings.HasSuffix(h, ".monkeycode-ai.online") {
+		return true
+	}
+	return false
 }
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {

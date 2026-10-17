@@ -17,6 +17,12 @@ GO_VER="1.25.0"
 NODE_VER="22.20.0"
 ADMIN_PORT="${ADMIN_PORT:-3009}"
 
+# 版本时间取「代码提交到仓库的时间」（HEAD 的提交时间），而非本次编译/部署时间。
+# 无 git 环境（如源码包解压）时回退为当前时间。
+commit_time() {
+  git log -1 --format=%cI 2>/dev/null || date -u +%Y-%m-%dT%H:%M:%SZ
+}
+
 if [ "$(id -u)" -ne 0 ]; then
   echo "请用 root 运行: bash install.sh"
   exit 1
@@ -47,7 +53,7 @@ if [ "${1:-install}" = "update" ]; then
   echo "[update/2] 编译后端..."
   VERSION=$(git rev-parse --short HEAD 2>/dev/null || echo dev)
   printf 'package main\n\nvar buildVersion = "%s"\nvar buildTime = "%s"\n' \
-    "$VERSION" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > version.go
+    "$VERSION" "$(commit_time)" > version.go
   go build -ldflags="-s -w" -o go-farm-bot .
   # 部署与重启
   mkdir -p "$DES"
@@ -205,7 +211,7 @@ cd "$SRC"
 echo "[2/6] 编译程序..."
 VERSION=$(git rev-parse --short HEAD 2>/dev/null || echo dev)
 printf 'package main\n\nvar buildVersion = "%s"\nvar buildTime = "%s"\n' \
-  "$VERSION" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > version.go
+  "$VERSION" "$(commit_time)" > version.go
 echo "  版本号: $VERSION"
 go build -ldflags="-s -w" -o go-farm-bot .
 BIN="$SRC/go-farm-bot"

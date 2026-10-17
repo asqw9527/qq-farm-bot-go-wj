@@ -31,14 +31,6 @@ func cstNow() string {
 	return time.Now().In(time.FixedZone("CST", 8*3600)).Format("2006-01-02 15:04:05")
 }
 
-func notifyEnabled() bool {
-	return models.GetSystemConfig().OfflineNotifyEnabled
-}
-
-func notifyNick() string {
-	return models.GetSystemConfig().OfflineNotifyNick
-}
-
 func notifyAccountName(accountID string) string {
 	if acc := models.GetAccountByID(accountID); acc != nil && acc.Name != "" {
 		return acc.Name

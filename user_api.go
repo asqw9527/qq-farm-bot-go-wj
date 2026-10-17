@@ -103,7 +103,7 @@ func handleUserLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, map[string]interface{}{
-		"ok": true,
+		"ok":    true,
 		"token": token,
 		"user": map[string]interface{}{
 			"username":     result.Username,
@@ -141,7 +141,7 @@ func handleUserRegister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, map[string]interface{}{
-		"ok":  true,
+		"ok":   true,
 		"user": result.User,
 	})
 }
@@ -216,7 +216,7 @@ func handleUserRenew(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]interface{}{
-		"ok":    success,
+		"ok":      success,
 		"message": msg,
 	})
 }
@@ -308,7 +308,7 @@ func handleUserClaimCard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
-		Username string `json:"username"`
+		Username  string `json:"username"`
 		UserAgent string `json:"userAgent,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -323,11 +323,11 @@ func handleUserClaimCard(w http.ResponseWriter, r *http.Request) {
 
 	result := models.ClaimCardByUA(ua, body.Username)
 	writeJSON(w, map[string]interface{}{
-		"ok":       result.Ok,
-		"cardCode": result.CardCode,
-		"days":     result.Days,
+		"ok":         result.Ok,
+		"cardCode":   result.CardCode,
+		"days":       result.Days,
 		"durationMs": result.DurationMs,
-		"error":  result.Error,
+		"error":      result.Error,
 	})
 }
 

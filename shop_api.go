@@ -89,6 +89,8 @@ func shopClient(r *http.Request) *gw.Client {
 
 // getSeedHarvestInfo exp=plant.exp, seasons=plant.seasons, income=果实单价×果实数
 func getSeedHarvestInfo(seedID int) (exp, seasons, income int64) {
+	cfgMu.RLock()
+	defer cfgMu.RUnlock()
 	p, ok := seedToPlantMap[seedID]
 	if !ok {
 		return 0, 1, 0

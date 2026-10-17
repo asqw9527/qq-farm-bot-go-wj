@@ -45,3 +45,11 @@ This file records user instructions, preferences, and teachings for reference in
   - 活动装饰/货币图标（如 1041 奶茶券、1042 宣传喇叭、2163 头像框、202011/203012/205011/206011/207012/208012 缤纷奶茶套装、210011-210017 套装）属最新 mainscene bundle；本地 cdn-settings.json 的 mainscene 版本（9e333）不含这些 S4 资源，需先更新抓包快照（wxgame_out 下最新 settings.*.json 的 assets.bundleVers）再跑素材同步才能取到图。
   - 种子/物品图片落盘规则：放入 game-config/seed_images_named/ 并命名 `{itemId}_任意.png`，InitImageMap 按文件名数字前缀收录，无需依赖 ItemInfo.asset_name。
   - 本地调试 /api/* 鉴权：Web 默认用户 admin/admin，可用 `POST /api/users/login` 换取 token 后带 `x-user-token` + `x-account-id` 调用（admin 后台登录需另设 ADMIN_PASSWORD 环境变量或 store.json 的 adminPasswordHash）。
+
+### User Instruction Entry
+[User Instruction Summary]
+- Date: 2026-10-17
+- Context: 用户上传临时文件（如 11.zip）用完后需要清理
+- Instructions:
+  - 在用户明确同意的情况下，允许执行删除文件操作。
+  - 默认仍遵循不主动删除原则：删除前先确认具体目标并取得用户同意；用户已同意过的临时文件可直接删除。

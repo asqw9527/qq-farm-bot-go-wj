@@ -286,11 +286,13 @@ func normalizeCocosUuid(v string) string {
 
 // ---------- manifest 下载与解析 ----------
 
+// syncHTTPClient 复用的 HTTP 客户端：共享连接池，避免每次请求新建 Transport。
+var syncHTTPClient = &http.Client{Timeout: syncTimeout}
+
 func fetchJSON(url string) ([]byte, error) {
 	var lastErr error
 	for attempt := 0; attempt <= syncRetries; attempt++ {
-		client := &http.Client{Timeout: syncTimeout}
-		resp, err := client.Get(url)
+		resp, err := syncHTTPClient.Get(url)
 		if err != nil {
 			lastErr = err
 			continue
@@ -1001,6 +1003,10 @@ func handleSyncStatus(w http.ResponseWriter, r *http.Request) {
 func handleAssetsCheck(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "POST only")
+		return
+	}
+	// 素材同步会写 game-config 并热重载映射，仅管理员可触发
+	if !requireAdminUser(w, r) {
 		return
 	}
 	assetsTask.mu.Lock()

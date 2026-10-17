@@ -140,30 +140,30 @@ type ActivityInfo struct {
 
 // ShopItem 兑换/随机商店商品项
 type ShopItem struct {
-	ID           int64  `json:"id"`
-	Name         string `json:"name"`
-	Sort         int64  `json:"sort"`
-	Status       int64  `json:"status"`
-	StatusLabel  string `json:"status_label,omitempty"`
-	Owned        bool   `json:"owned"`
-	IsRepeatable bool   `json:"is_repeatable,omitempty"` // 化肥/道具：可重复兑换（type 7 或 fertilizer/fertilizerpro）
-	ExchangeLimit int64 `json:"exchange_limit,omitempty"`  // 可重复道具=剩余可兑换次数
-	ItemID       int64  `json:"item_id,omitempty"`
-	Count        int64  `json:"count,omitempty"`
-	Image        string `json:"image,omitempty"`
-	CurrencyID   int64  `json:"currency_id,omitempty"` // cost.itemId（星砂=1023）
-	CurrencyName string `json:"currency_name,omitempty"`
-	Price        int64  `json:"price,omitempty"`        // cost.count
+	ID            int64  `json:"id"`
+	Name          string `json:"name"`
+	Sort          int64  `json:"sort"`
+	Status        int64  `json:"status"`
+	StatusLabel   string `json:"status_label,omitempty"`
+	Owned         bool   `json:"owned"`
+	IsRepeatable  bool   `json:"is_repeatable,omitempty"`  // 化肥/道具：可重复兑换（type 7 或 fertilizer/fertilizerpro）
+	ExchangeLimit int64  `json:"exchange_limit,omitempty"` // 可重复道具=剩余可兑换次数
+	ItemID        int64  `json:"item_id,omitempty"`
+	Count         int64  `json:"count,omitempty"`
+	Image         string `json:"image,omitempty"`
+	CurrencyID    int64  `json:"currency_id,omitempty"` // cost.itemId（星砂=1023）
+	CurrencyName  string `json:"currency_name,omitempty"`
+	Price         int64  `json:"price,omitempty"` // cost.count
 }
 
 // ActivityNode 分组树节点
 type ActivityNode struct {
-	Info         *ActivityInfo    `json:"info"`
-	Children     []*ActivityNode  `json:"children,omitempty"`
-	ExchangeShop []*ShopItem      `json:"exchange_shop,omitempty"` // field102
-	RandomShop   []*ShopItem      `json:"random_shop,omitempty"`   // field101
-	HasDraw      bool             `json:"has_draw"`                // field105
-	DrawInfo     []byte           `json:"-"`
+	Info         *ActivityInfo   `json:"info"`
+	Children     []*ActivityNode `json:"children,omitempty"`
+	ExchangeShop []*ShopItem     `json:"exchange_shop,omitempty"` // field102
+	RandomShop   []*ShopItem     `json:"random_shop,omitempty"`   // field101
+	HasDraw      bool            `json:"has_draw"`                // field105
+	DrawInfo     []byte          `json:"-"`
 }
 
 // --- 解析函数 ---
@@ -237,7 +237,7 @@ func parseShopItemFull(raw []byte) *ShopItem {
 
 // isRepeatableItem 判定可重复兑换道具
 func isRepeatableItem(itemID int64) bool {
-	if it, ok := itemInfoMap[int(itemID)]; ok {
+	if it, ok := getItemByID(int(itemID)); ok {
 		if it.Type == 7 {
 			return true
 		}
@@ -268,6 +268,7 @@ func exchangeShopStatusLabel(it *ShopItem) string {
 }
 
 // ParseActivityList 解析 ActivityService.List 返回：
+//
 //	实测顶层仅 field1(单个大分组) + field2(repeated 精简活动条目)
 //	entry: 1=id(varint) 2=title(string) 3=start(varint) 4=end(varint)
 func ParseActivityList(body []byte) []*ActivityInfo {
@@ -329,40 +330,40 @@ func parseActivityNode(raw []byte) *ActivityNode {
 
 // ParseSeason 解析 SeasonService.GetSeasonInfo 返回
 type SeasonPassport struct {
-	ActivityID       int64    `json:"activity_id"`
-	CurrentLevel     int64    `json:"current_level"`
-	Score            int64    `json:"score"`
-	CurrentProgress  int64    `json:"current_progress"`
-	NextLevelNeed    int64    `json:"next_level_need"`
-	MaxLevel         int64    `json:"max_level"`
-	FreeClaimedLevel int64    `json:"free_claimed_level"`
-	PremiumClaimed   int64    `json:"premium_claimed_level"`
-	Title            string   `json:"title"`
-	ClaimableLevels  int64    `json:"claimable_levels"`
-	RewardTiers      []*Tier  `json:"reward_tiers"`
+	ActivityID       int64   `json:"activity_id"`
+	CurrentLevel     int64   `json:"current_level"`
+	Score            int64   `json:"score"`
+	CurrentProgress  int64   `json:"current_progress"`
+	NextLevelNeed    int64   `json:"next_level_need"`
+	MaxLevel         int64   `json:"max_level"`
+	FreeClaimedLevel int64   `json:"free_claimed_level"`
+	PremiumClaimed   int64   `json:"premium_claimed_level"`
+	Title            string  `json:"title"`
+	ClaimableLevels  int64   `json:"claimable_levels"`
+	RewardTiers      []*Tier `json:"reward_tiers"`
 }
 
 type Tier struct {
-	Level         int64    `json:"level"`
-	FreeRewards   []*Item  `json:"free_rewards,omitempty"`
+	Level          int64   `json:"level"`
+	FreeRewards    []*Item `json:"free_rewards,omitempty"`
 	PremiumRewards []*Item `json:"premium_rewards,omitempty"`
 }
 
 type Item struct {
-	ItemID   int64  `json:"item_id"`
-	Count    int64  `json:"count"`
-	Name     string `json:"name"`
-	Image    string `json:"image,omitempty"`
+	ItemID int64  `json:"item_id"`
+	Count  int64  `json:"count"`
+	Name   string `json:"name"`
+	Image  string `json:"image,omitempty"`
 }
 
 type SeasonInfo struct {
-	Title        string          `json:"season_title"`
-	Status       int64           `json:"status"`
-	StartTime    int64           `json:"start_time"`
-	EndTime      int64           `json:"end_time"`
-	NowTime      int64           `json:"now_time"`
-	ActivityID   int64           `json:"activity_id"`
-	Passport     *SeasonPassport `json:"passport"`
+	Title      string          `json:"season_title"`
+	Status     int64           `json:"status"`
+	StartTime  int64           `json:"start_time"`
+	EndTime    int64           `json:"end_time"`
+	NowTime    int64           `json:"now_time"`
+	ActivityID int64           `json:"activity_id"`
+	Passport   *SeasonPassport `json:"passport"`
 }
 
 func ParseSeason(body []byte) *SeasonInfo {
@@ -443,22 +444,22 @@ func parseItem(raw []byte) *Item {
 
 // ParseSolar 解析 SolarTermsService.GetSolarTerms 返回
 type SolarTerm struct {
-	ID       int64    `json:"id"`
-	Status   int64    `json:"status"`
-	Label    string   `json:"status_label"`
+	ID        int64   `json:"id"`
+	Status    int64   `json:"status"`
+	Label     string  `json:"status_label"`
 	Claimable bool    `json:"claimable"`
-	Start    int64    `json:"start_time"`
-	End      int64    `json:"end_time"`
-	Title    string   `json:"title"`
-	Rewards  []*Item  `json:"rewards,omitempty"`
+	Start     int64   `json:"start_time"`
+	End       int64   `json:"end_time"`
+	Title     string  `json:"title"`
+	Rewards   []*Item `json:"rewards,omitempty"`
 }
 
 type SolarInfo struct {
-	NowTime         int64         `json:"now_time"`
-	Terms           []*SolarTerm  `json:"terms"`
-	ClaimableCount  int           `json:"claimable_count"`
-	CurrentTermID   int64         `json:"current_term_id"`
-	TipsText        string        `json:"tips_text"`
+	NowTime        int64        `json:"now_time"`
+	Terms          []*SolarTerm `json:"terms"`
+	ClaimableCount int          `json:"claimable_count"`
+	CurrentTermID  int64        `json:"current_term_id"`
+	TipsText       string       `json:"tips_text"`
 }
 
 func ParseSolar(body []byte) *SolarInfo {
@@ -468,11 +469,11 @@ func ParseSolar(body []byte) *SolarInfo {
 	for _, termRaw := range actBytesAll(reply, 1) {
 		t := readActFields(termRaw)
 		term := &SolarTerm{
-			ID:      actNum(t, 1),
-			Status:  actNum(t, 2),
-			Start:   actNum(t, 3),
-			End:     actNum(t, 4),
-			Title:   actStr(t, 6),
+			ID:     actNum(t, 1),
+			Status: actNum(t, 2),
+			Start:  actNum(t, 3),
+			End:    actNum(t, 4),
+			Title:  actStr(t, 6),
 		}
 		term.Title = solarTermTitle(term.Title, term.Start, term.End)
 		term.Claimable = term.Status == 2
@@ -620,18 +621,18 @@ type ConstellationNode struct {
 }
 
 type ConstellationSummary struct {
-	TotalDays      int    `json:"total_days"`
-	CurrentDay     int64  `json:"current_day"`
-	UnlockedCount  int    `json:"unlocked_count"`
-	ClaimedCount   int    `json:"claimed_count"`
-	ClaimableCount int    `json:"claimable_count"`
+	TotalDays      int     `json:"total_days"`
+	CurrentDay     int64   `json:"current_day"`
+	UnlockedCount  int     `json:"unlocked_count"`
+	ClaimedCount   int     `json:"claimed_count"`
+	ClaimableCount int     `json:"claimable_count"`
 	PendingRewards []*Item `json:"pending_rewards"`
 }
 
 type ConstellationInfo struct {
 	ActivityID  int64                `json:"activity_id"`
 	Title       string               `json:"title"`
-	SeasonTitle  string               `json:"seasonTitle"` // 
+	SeasonTitle string               `json:"seasonTitle"` //
 	StartTime   int64                `json:"start_time"`
 	EndTime     int64                `json:"end_time"`
 	NowTime     int64                `json:"now_time"`
@@ -780,7 +781,7 @@ func ParseConstellation(body []byte) *ConstellationInfo {
 	if serverDay > 0 {
 		base.CurrentDay = serverDay
 	} else if base.StartTime > 0 && now > base.StartTime {
-		d := (now - base.StartTime) / 86400 + 1
+		d := (now-base.StartTime)/86400 + 1
 		if d < 1 {
 			d = 1
 		}
@@ -852,8 +853,8 @@ func ParseSeasonClaim(body []byte) *SeasonClaimResult {
 // ParseSolarClaim 解析 SolarTermsService.ClaimSolarTerms 返回
 // field1=rewards field2=term
 type SolarClaimResult struct {
-	Rewards []*Item     `json:"rewards"`
-	Term    *SolarTerm  `json:"term,omitempty"`
+	Rewards []*Item    `json:"rewards"`
+	Term    *SolarTerm `json:"term,omitempty"`
 }
 
 func ParseSolarClaim(body []byte) *SolarClaimResult {

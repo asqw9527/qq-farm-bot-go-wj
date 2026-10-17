@@ -14,7 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"nhooyr.io/websocket"
+	"github.com/coder/websocket"
 
 	"github.com/Aoluis1005/go-farm-bot/ace"
 	"github.com/Aoluis1005/go-farm-bot/proto"
@@ -44,7 +44,7 @@ type Client struct {
 	firstToken string // 首次请求(登录)的 ACE 初始化凭据
 	seq        int64
 	mu         sync.Mutex
-	writeMu    sync.Mutex // 序列化 WebSocket 写：避免并发 goroutine（自动化 + 前端 HTTP handler + 心跳）同写一条连接导致帧交错损坏（nhooyr.io/websocket 不支持并发写）
+	writeMu    sync.Mutex // 序列化 WebSocket 写：避免并发 goroutine（自动化 + 前端 HTTP handler + 心跳）同写一条连接导致帧交错损坏（github.com/coder/websocket 不支持并发写）
 	pending    map[int64]chan *proto.Message
 	// 请求槽位机制：限制单连接并发在途请求数，避免 ACE 轮询占满网关
 	// 单槽位后游戏请求(AllLands/Bag)被饿死 → 后台“在线但无数据/卡死”。
@@ -264,7 +264,7 @@ func (c *Client) Request(ctx context.Context, service, method string, body []byt
 	c.mu.Unlock()
 	payload := proto.EncodeMessage(meta, encBody, token)
 
-	// 串行化写：nhooyr.io/websocket 不允许并发 Write，而 Go 多线程下单连接会被
+	// 串行化写：github.com/coder/websocket 不允许并发 Write，而 Go 多线程下单连接会被
 	// 自动化 goroutine / 前端 handler / 心跳同时写，不加锁会交错损坏帧 → 网关超时/拿不到数据。
 	// 仅 Write 阶段持锁，readLoop 在另一把锁(mu)上读 pending，不会死锁。
 	c.writeMu.Lock()

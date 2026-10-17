@@ -82,10 +82,12 @@ func EncodeUseRequest(itemID, count int64) []byte {
 
 // EncodeUseRequestFallback 使用物品的 raw protobuf 回退编码。
 // 严格照抄 Node core/src/services/warehouse.js useItem() 的 catch 分支（118-134 行）：
+//
 //	writer.uint32(10).fork();                // field 1, wire 2（嵌套 message）
 //	writer.uint32(8).int64(toLong(itemId));  // 内层 field 1, varint
 //	writer.uint32(16).int64(toLong(count));  // 内层 field 2, varint
 //	writer.ldelim();
+//
 // 即：外层 field1 是一个 length-delimited 子消息，子消息里才是 item_id/count。
 // 与 itempb.proto 里 UseRequest{item_id=1,count=2} 的平铺结构不同——线上服务端
 // 实际期望的是这种嵌套形态，proto 文件已过时，故 Node 才需要这个回退。
@@ -144,7 +146,7 @@ func EncodeBatchUseRequest(items []SellItem) []byte {
 	return b.Bytes()
 }
 
-// IsFertilizerContainerFullError 
+// IsFertilizerContainerFullError
 // code=1003002 或容器已满文案 → 静默返回（视为"已满，无需填充"）
 func IsFertilizerContainerFullError(msg string) bool {
 	return strings.Contains(msg, "code=1003002") ||

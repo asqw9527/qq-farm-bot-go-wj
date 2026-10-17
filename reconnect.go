@@ -222,9 +222,9 @@ func (p *ClientPool) reconnectStatus(accountID string) map[string]interface{} {
 		}
 	}
 	st := map[string]interface{}{
-		"state":     state,
-		"stopped":   p.stopped[accountID],
-		"attempts":  p.reconnectAttempts[accountID],
+		"state":    state,
+		"stopped":  p.stopped[accountID],
+		"attempts": p.reconnectAttempts[accountID],
 	}
 	if since, ok := p.offlineSince[accountID]; ok {
 		st["offlineSince"] = since.Format(time.RFC3339)

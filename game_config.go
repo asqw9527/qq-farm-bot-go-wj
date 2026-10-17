@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // ============================================================
@@ -63,13 +64,21 @@ var (
 	mutantEffectMap = map[int]mutantEffectEntry{} // mutant id -> 效果
 )
 
+// cfgMu 保护运行期从配置建立的映射（seedToPlantMap / itemInfoMap / itemImageMap 等）
+// 在「热重载写」与「并发读」之间的安全：
+//   - 写路径：initGameConfig / InitImageMap 整段持写锁（含构建与替换）；
+//   - 读路径：各查询函数持读锁。
+//
+// 热重载由 /api/sync/* 触发，若不加锁会出现 map 并发读写导致进程崩溃。
+var cfgMu sync.RWMutex
+
 // extraItemNames 官方 ItemInfo.json 未收录的物品（新活动临时道具，配置未同步），
 // 手动登记名称——缺了它们背包里只会显示一串 id，无法辨认。
 // 图片素材暂缺，前端按无图处理；等官方补进 ItemInfo.json 后本表可安全移除（JSON 优先，见 loadItemInfoJSON）。
 var extraItemNames = map[int]string{
-	20883: "小红花种子", // 公益小红花：完成每日任务/每日分享获得，种下后结小红花果实
-	1040:  "爱心值",   // 公益小红花：收获小红花果实获得；捐赠后从背包扣除（抓包 ItemNotify 1040 -7 实锤）
-	20435: "山丹丹种子", // 山丹丹/月下美人活动变体
+	20883: "小红花种子",  // 公益小红花：完成每日任务/每日分享获得，种下后结小红花果实
+	1040:  "爱心值",    // 公益小红花：收获小红花果实获得；捐赠后从背包扣除（抓包 ItemNotify 1040 -7 实锤）
+	20435: "山丹丹种子",  // 山丹丹/月下美人活动变体
 	26030: "月下美人种子", // 月下美人活动变体
 	// S4「森野茶香季」活动种子（ItemInfo 未同步，名称取自兑换商店）
 	20021: "森野可可豆种子",
@@ -99,14 +108,14 @@ var extraItemNames = map[int]string{
 
 // itemNameAliases 覆盖官方配置展示名（月光花客户端俗称山丹丹/月下美人）。
 var itemNameAliases = map[int]string{
-	20435:   "山丹丹种子", // 活动变体
-	21404:   "山丹丹种子", // 月下美人/月光花的玩家昵称
+	20435:   "山丹丹种子",  // 活动变体
+	21404:   "山丹丹种子",  // 月下美人/月光花的玩家昵称
 	26030:   "月下美人种子", // 活动变体
 	41404:   "山丹丹",
 	1021404: "山丹丹",
 	1121404: "黄金·山丹丹",
 	1041404: "黄金·山丹丹",
-	1041:    "奶茶券", // S4 森野茶香季活动货币（ItemInfo 未入库）
+	1041:    "奶茶券",  // S4 森野茶香季活动货币（ItemInfo 未入库）
 	1042:    "宣传喇叭", // S4 森野茶香季活动道具
 }
 
@@ -120,6 +129,8 @@ var assetNameAliases = map[int]string{
 // initGameConfig 从 gameConfigDir 加载 Plant.json / ItemInfo.json。
 // 成功加载后调用方可用 IsFruitItemID / IsSeedItemID / itemName 做精确分类。
 func initGameConfig(gameConfigDir string) {
+	cfgMu.Lock()
+	defer cfgMu.Unlock()
 	loadPlantJSON(filepath.Join(gameConfigDir, "Plant.json"))
 	loadItemInfoJSON(filepath.Join(gameConfigDir, "ItemInfo.json"))
 	loadMutantEffectJSON(filepath.Join(gameConfigDir, "MutantEffect.json"))
@@ -153,13 +164,23 @@ func fillMissingSeedPlants() {
 
 // plantForSeed 按种子物品 ID 取植物配置。Plant.json 缺条目时，ItemInfo 种子或 20001–29999 按 1x1 兜底。
 func plantForSeed(seedID int) (plantEntry, bool) {
+	cfgMu.RLock()
+	defer cfgMu.RUnlock()
 	if p, ok := seedToPlantMap[seedID]; ok {
 		return p, true
 	}
 	if seedItemSet[seedID] || (seedID >= 20001 && seedID <= 29999) {
-		return plantEntry{ID: seedID, SeedID: seedID, Size: 1, Name: seedPlantName(int64(seedID))}, true
+		return plantEntry{ID: seedID, SeedID: seedID, Size: 1, Name: seedPlantNameLocked(int64(seedID))}, true
 	}
 	return plantEntry{}, false
+}
+
+// getSeedPlant 仅按 Plant.json 的 seed_id 直查（无范围兜底），供并发安全读取。
+func getSeedPlant(seedID int) (plantEntry, bool) {
+	cfgMu.RLock()
+	defer cfgMu.RUnlock()
+	p, ok := seedToPlantMap[seedID]
+	return p, ok
 }
 
 func loadPlantJSON(path string) {
@@ -262,6 +283,8 @@ func isFruitItemID(id int64) bool {
 	if n <= 0 {
 		return false
 	}
+	cfgMu.RLock()
+	defer cfgMu.RUnlock()
 	if _, ok := fruitToPlantMap[n]; ok {
 		return true
 	}
@@ -274,6 +297,8 @@ func isSeedItemID(id int64) bool {
 	if n <= 0 {
 		return false
 	}
+	cfgMu.RLock()
+	defer cfgMu.RUnlock()
 	if seedItemSet[n] {
 		return true
 	}
@@ -300,6 +325,8 @@ func isFertilizerItemID(id int64) bool {
 	case 100003, 100004, 100005, 100006, 100007, 100008, 100009, 100010, 100011, 100012:
 		return true
 	}
+	cfgMu.RLock()
+	defer cfgMu.RUnlock()
 	if it, ok := itemInfoMap[n]; ok {
 		t := string(it.InteractionType)
 		return t == "fertilizer" || t == "fertilizerpro"
@@ -309,6 +336,8 @@ func isFertilizerItemID(id int64) bool {
 
 // fruitPlantName 果实植物名（"草莓" 等，不含"果实"后缀；找不到返回空）
 func fruitPlantName(id int64) string {
+	cfgMu.RLock()
+	defer cfgMu.RUnlock()
 	if n, ok := itemNameAliases[int(id)]; ok {
 		return n
 	}
@@ -324,6 +353,14 @@ func fruitPlantName(id int64) string {
 // seedPlantName 种子对应植物名（"草莓" 等；找不到返回空）
 // 若 ItemInfo 有 type5 的种子条目则直接用其名（如"草莓种子"）。
 func seedPlantName(id int64) string {
+	cfgMu.RLock()
+	defer cfgMu.RUnlock()
+	return seedPlantNameLocked(id)
+}
+
+// seedPlantNameLocked 与 seedPlantName 相同，但要求调用方已持有 cfgMu（读/写锁），
+// 供 plantForSeed 等已持锁的内部路径复用，避免读锁嵌套导致死锁。
+func seedPlantNameLocked(id int64) string {
 	if n, ok := itemNameAliases[int(id)]; ok {
 		return n
 	}
@@ -338,6 +375,8 @@ func seedPlantName(id int64) string {
 
 // itemDisplayName 物品展示名（未在 ItemInfo 收录时返回 "物品{id}"）
 func itemDisplayName(id int64) string {
+	cfgMu.RLock()
+	defer cfgMu.RUnlock()
 	if n, ok := itemNameAliases[int(id)]; ok {
 		return n
 	}
@@ -353,6 +392,8 @@ func itemDisplayName(id int64) string {
 
 // getPlantByID 按植物ID取植物配置
 func getPlantByID(plantID int64) (plantEntry, bool) {
+	cfgMu.RLock()
+	defer cfgMu.RUnlock()
 	p, ok := plantByIDMap[int(plantID)]
 	return p, ok
 }
@@ -360,6 +401,8 @@ func getPlantByID(plantID int64) (plantEntry, bool) {
 // getPlantGrowTime 总生长秒数
 // grow_phases 形如 "种子:5760;发芽:5760;...;成熟:0;"，取每段 ":(\d+)" 求和
 func getPlantGrowTime(plantID int64) int64 {
+	cfgMu.RLock()
+	defer cfgMu.RUnlock()
 	p, ok := plantByIDMap[int(plantID)]
 	if !ok || p.GrowPhases == "" {
 		return 0
@@ -380,6 +423,8 @@ func getPlantGrowTime(plantID int64) int64 {
 
 // getPlantNameOrNull 按植物ID取名称（找不到返回空串）
 func getPlantNameOrNull(plantID int64) string {
+	cfgMu.RLock()
+	defer cfgMu.RUnlock()
 	if n, ok := itemNameAliases[int(plantID)]; ok {
 		return n
 	}
@@ -414,6 +459,8 @@ func mutantIconShort(icon string) string {
 }
 
 func getMutantEffectsByIDs(ids []int64) []MutantEffect {
+	cfgMu.RLock()
+	defer cfgMu.RUnlock()
 	out := []MutantEffect{}
 	for _, id := range ids {
 		it, ok := mutantEffectMap[int(id)]

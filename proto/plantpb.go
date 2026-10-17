@@ -541,7 +541,9 @@ type FarmingResult struct {
 }
 
 // DecodeFarmingReply 解析 PlantService.Farming 的 reply：
+//
 //	operation_limits=字段2（repeated OperationLimit）、results=字段3（repeated FarmingResult）。
+//
 // 返回解析出的每日限制与成功帮忙的地块ID列表。
 func DecodeFarmingReply(buf []byte) (limits []OperationLimit, landIDs []int64) {
 	if len(buf) == 0 {

@@ -11,14 +11,14 @@ package proto
 
 // MallGoods 道具商城商品
 type MallGoods struct {
-	GoodsID     int64
-	Name        string
-	Type        int64
-	PriceBytes  []byte // field5，为序列化整数，需 ParseMallPriceValue
-	IsFree      bool
-	LimitBytes  []byte // field7，序列化 limitCount/boughtNum
-	IsLimited   bool
-	Discount    string
+	GoodsID    int64
+	Name       string
+	Type       int64
+	PriceBytes []byte // field5，为序列化整数，需 ParseMallPriceValue
+	IsFree     bool
+	LimitBytes []byte // field7，序列化 limitCount/boughtNum
+	IsLimited  bool
+	Discount   string
 }
 
 // MallListReply GetMallListBySlotTypeResponse

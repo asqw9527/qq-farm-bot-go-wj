@@ -11,6 +11,8 @@ package main
 // plantByIDMap 按 plant.id 存储，遍历即可。
 // 另外包含 seedToPlantMap 中但不在 plantByIDMap 的种子（Plant.json 缺失的）。
 func getAllPlants() []plantEntry {
+	cfgMu.RLock()
+	defer cfgMu.RUnlock()
 	out := make([]plantEntry, 0, len(plantByIDMap)+len(seedToPlantMap))
 	for _, p := range plantByIDMap {
 		out = append(out, p)
@@ -26,6 +28,8 @@ func getAllPlants() []plantEntry {
 
 // getFruitPrice 果实单价
 func getFruitPrice(fruitID int) float64 {
+	cfgMu.RLock()
+	defer cfgMu.RUnlock()
 	if it, ok := itemInfoMap[fruitID]; ok {
 		return it.Price
 	}
@@ -34,6 +38,8 @@ func getFruitPrice(fruitID int) float64 {
 
 // getSeedPrice 种子价格
 func getSeedPrice(seedID int) float64 {
+	cfgMu.RLock()
+	defer cfgMu.RUnlock()
 	if it, ok := itemInfoMap[seedID]; ok {
 		return it.Price
 	}
@@ -42,6 +48,8 @@ func getSeedPrice(seedID int) float64 {
 
 // getSeedLevel 种子所需等级
 func getSeedLevel(seedID int) int {
+	cfgMu.RLock()
+	defer cfgMu.RUnlock()
 	if it, ok := itemInfoMap[seedID]; ok {
 		return it.Level
 	}
@@ -50,18 +58,24 @@ func getSeedLevel(seedID int) int {
 
 // getItemById 按物品ID取条目
 func getItemByID(itemID int) (itemInfoEntry, bool) {
+	cfgMu.RLock()
+	defer cfgMu.RUnlock()
 	it, ok := itemInfoMap[itemID]
 	return it, ok
 }
 
 // getPlantByFruitId 按果实ID取植物
 func getPlantByFruitID(fruitID int) (plantEntry, bool) {
+	cfgMu.RLock()
+	defer cfgMu.RUnlock()
 	p, ok := fruitToPlantMap[fruitID]
 	return p, ok
 }
 
 // getFruitLayerByFruitId 果实层级
 func getFruitLayerByFruitID(fruitID int) int {
+	cfgMu.RLock()
+	defer cfgMu.RUnlock()
 	if it, ok := itemInfoMap[fruitID]; ok {
 		return it.Layer
 	}

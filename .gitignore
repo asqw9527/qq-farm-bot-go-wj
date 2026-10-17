@@ -33,3 +33,6 @@ server.log
 # 逆向抓包/上传素材（含游戏原始资源与缓存清单，严禁入库）
 cacheList.json
 uploads/
+
+# 素材增量同步状态（本地生成，含 uuid/hash，环境相关，不入库）
+game-config/.assets-sync.json

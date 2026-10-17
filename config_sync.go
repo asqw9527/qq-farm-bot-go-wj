@@ -438,6 +438,10 @@ func extractNewIDs(remoteJSON, localJSON []byte, limit int) []int {
 
 // handleConfigCheck POST /api/sync/config/check 触发后台配置同步
 func handleConfigCheck(w http.ResponseWriter, r *http.Request) {
+	// 配置同步会写 game-config 并热重载映射，仅管理员可触发
+	if !requireAdminUser(w, r) {
+		return
+	}
 	configSyncTask.mu.Lock()
 	if configSyncTask.running {
 		configSyncTask.mu.Unlock()

@@ -24,7 +24,7 @@ type MysteryNPC struct {
 	OriginalPrice int64
 }
 
-// GetActiveNPCReply 
+// GetActiveNPCReply
 type GetActiveNPCReply struct {
 	Active    bool
 	NPC       *MysteryNPC
@@ -89,7 +89,7 @@ func DecodeGetActiveNPCReply(buf []byte) *GetActiveNPCReply {
 	return rep
 }
 
-// EncodeMysteryBuyRequest 
+// EncodeMysteryBuyRequest
 func EncodeMysteryBuyRequest(npcID int64) []byte {
 	b := NewBuilder()
 	b.FieldInt64(1, npcID)

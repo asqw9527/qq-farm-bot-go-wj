@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/base64"
 	"net/http"
 	"strconv"
 	"strings"
@@ -60,23 +59,6 @@ const (
 	// —— 公益礼包就是送出公益金时一并到账的奖励，不是独立领取操作。
 	honghuaGiftItem = 80001
 )
-
-// honghuaTier 个人爱心值档位奖励（抓包 f116 实锤：阈值→奖励）。
-type honghuaTier struct {
-	Threshold int64  `json:"threshold"` // 累计爱心值门槛
-	ItemID    int64  `json:"itemId"`    // 奖励物品 id
-	ItemName  string `json:"itemName"`
-	Count     int64  `json:"count"` // 奖励数量
-}
-
-// honghuaTiers 5 档（f116 f9 repeated：30/60/90/120/150）。
-var honghuaTiers = []honghuaTier{
-	{Threshold: 30, ItemID: honghuaRewardItemOrganic, ItemName: "有机化肥(8小时)", Count: 1},
-	{Threshold: 60, ItemID: honghuaRewardItemCoupon, ItemName: "点券", Count: 50},
-	{Threshold: 90, ItemID: honghuaRewardItemOrganic, ItemName: "有机化肥(8小时)", Count: 2},
-	{Threshold: 120, ItemID: honghuaRewardItemCoupon, ItemName: "点券", Count: 100},
-	{Threshold: 150, ItemID: honghuaRewardItemFrame, ItemName: "公益小红花做好事头像框", Count: 1},
-}
 
 // honghuaItemName 小红花活动物品名。
 func honghuaItemName(id int64) string {
@@ -137,23 +119,6 @@ func honghuaFundMark(accountID string) {
 	honghuaFundMu.Lock()
 	defer honghuaFundMu.Unlock()
 	honghuaFundDate[accountID] = time.Now().Format("20060102")
-}
-
-// honghuaF3ForCmd 返回某 cmd 对应的真实 field3 配置块（抓包实锤，真实客户端必带）。
-// 默认用 love 块；love/fund 分别用各自抓到的块（差异 3 字节，按 cmd 精确匹配最稳）。
-func honghuaF3ForCmd(cmd int64) []byte {
-	s := honghuaF3LoveB64
-	switch cmd {
-	case honghuaFundCmd:
-		s = honghuaF3FundB64
-	}
-	if s == "" {
-		return nil // 无真实数据时省略 field3，避免发送空配置块
-	}
-	if dec, e := base64.StdEncoding.DecodeString(s); e == nil {
-		return dec
-	}
-	return nil
 }
 
 // honghuaOperate 组装公益小红花 Operate 请求，返回原始回包 body。

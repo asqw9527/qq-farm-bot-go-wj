@@ -11,6 +11,7 @@ import (
 
 // 每日任务
 // 字段号
+//
 //	TaskInfo: growth_tasks=1, daily_tasks=2, tasks=3, actives=4
 //	Task: id=1, progress=2, is_claimed=3(bool), is_unlocked=4, total_progress=6, desc=9, task_type=10
 //	TaskInfoReply: task_info=1
@@ -180,7 +181,8 @@ func handleTaskClaim(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/task/daily-gifts 每日礼包领取状态（商城免费礼/分享/邮件/月卡/会员）
 // POST /api/task/daily-gifts/claim body: { type: "mall"|"share"|"email"|"monthcard"|"vip"|"all" }
-//   手动触发对应每日礼包领取
+//
+//	手动触发对应每日礼包领取
 func handleTaskDailyGifts(w http.ResponseWriter, r *http.Request) {
 	accountID := resolveAccountIDWithOwner(r, r.URL.Query().Get("accountId"))
 	if accountID == "" {

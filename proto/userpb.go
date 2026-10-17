@@ -6,22 +6,22 @@ package proto
 // LoginRequest 登录请求
 func EncodeLoginRequest(clientVersion string) []byte {
 	b := NewBuilder()
-	b.FieldInt64(3, 0) // sharer_id
+	b.FieldInt64(3, 0)   // sharer_id
 	b.FieldString(4, "") // sharer_open_id
 
 	// device_info field=5
 	di := NewBuilder()
 	di.FieldString(1, clientVersion)
 	di.FieldString(2, "iOS 26.2.1")
-	di.FieldString(3, "")    // sys_hardware
-	di.FieldString(4, "")    // telecom_oper
+	di.FieldString(3, "") // sys_hardware
+	di.FieldString(4, "") // telecom_oper
 	di.FieldString(5, "wifi")
 	di.FieldInt64(10, 7672) // memory
 	di.FieldString(13, "iPhone X<iPhone18,3>")
 	b.FieldMessage(5, di.Bytes())
 
-	b.FieldInt64(6, 0)            // share_cfg_id
-	b.FieldString(7, "1256")      // scene_id
+	b.FieldInt64(6, 0)       // share_cfg_id
+	b.FieldString(7, "1256") // scene_id
 
 	// report_data field=8
 	rd := NewBuilder()
@@ -34,11 +34,11 @@ func EncodeLoginRequest(clientVersion string) []byte {
 
 // BasicInfo 登录返回的基础信息
 type BasicInfo struct {
-	GID   int64
-	Name  string
-	Level int64
-	Exp   int64
-	Gold  int64
+	GID    int64
+	Name   string
+	Level  int64
+	Exp    int64
+	Gold   int64
 	OpenID string
 	Avatar string
 }

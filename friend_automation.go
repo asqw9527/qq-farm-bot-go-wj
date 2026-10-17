@@ -302,29 +302,6 @@ func canOperate(accountID string, opID, fallback int64) bool {
 	return st.DayTimes < limit
 }
 
-func getOperationDayTimes(accountID string, opID int64) int64 {
-	opLimitsMu.Lock()
-	defer opLimitsMu.Unlock()
-	if st, ok := opLimits[accountID][opID]; ok {
-		return st.DayTimes
-	}
-	return 0
-}
-
-// canGetExp 今日是否还能获得经验（(opId)）
-func canGetExp(accountID string, opID int64) bool {
-	opLimitsMu.Lock()
-	defer opLimitsMu.Unlock()
-	st, ok := opLimits[accountID][opID]
-	if !ok {
-		return true
-	}
-	if st.DayExpTimesLimit <= 0 {
-		return true
-	}
-	return st.DayExpTimes < st.DayExpTimesLimit
-}
-
 func getCanGetHelpExp(accountID string) bool {
 	opLimitsMu.Lock()
 	defer opLimitsMu.Unlock()
@@ -489,7 +466,10 @@ func isIgnorableBadFailureMessage(msg string) bool {
 // 狗信息只靠日常偷菜/帮忙被动收集（doFriendOperation Enter 后 cacheFriendDog）
 // 手动刷新走面板按钮 /api/friends/fetch-dog-info。保留函数名避免调用点改动。
 func bootstrapFriendDogInfoCacheIfNeeded(c *gw.Client, accountID string, friends []*proto.GameFriend) {
-	return
+	// 有意保留的空实现：刷新逻辑已移除，仅保留函数名避免调用点改动。
+	_ = c
+	_ = accountID
+	_ = friends
 }
 
 func checkFriends(c *gw.Client, accountID string, cfg config.AccountConfig, onlySteal, onlyHelp bool) int64 {

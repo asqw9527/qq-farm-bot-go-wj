@@ -3,8 +3,9 @@ module github.com/Aoluis1005/go-farm-bot
 go 1.25.0
 
 require (
+	github.com/coder/websocket v1.8.15
 	github.com/tetratelabs/wazero v1.12.0
-	nhooyr.io/websocket v1.8.17
+	golang.org/x/crypto v0.39.0
 	yyb_go v0.0.0
 )
 
@@ -46,7 +47,6 @@ require (
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/ugorji/go/codec v1.2.12 // indirect
 	golang.org/x/arch v0.8.0 // indirect
-	golang.org/x/crypto v0.39.0 // indirect
 	golang.org/x/exp v0.0.0-20250620022241-b7579e27df2b // indirect
 	golang.org/x/net v0.41.0 // indirect
 	golang.org/x/sys v0.44.0 // indirect

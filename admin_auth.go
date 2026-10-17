@@ -280,14 +280,14 @@ func handleAdminSystemConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	case "POST":
 		var body struct {
-			ClientVersion          string `json:"clientVersion"`
-			OfflineNotifyEnabled   *bool  `json:"offlineNotifyEnabled"`
-			OfflineNotifyNick      string `json:"offlineNotifyNick"`
-			OfflineNotifyCooldownMin int  `json:"offlineNotifyCooldownMin"`
-			DailyReportEnabled     *bool  `json:"dailyReportEnabled"`
-			DailyReportTime        string `json:"dailyReportTime"`
-			BarkEnabled            *bool  `json:"barkEnabled"`
-			BarkKey                string `json:"barkKey"`
+			ClientVersion            string `json:"clientVersion"`
+			OfflineNotifyEnabled     *bool  `json:"offlineNotifyEnabled"`
+			OfflineNotifyNick        string `json:"offlineNotifyNick"`
+			OfflineNotifyCooldownMin int    `json:"offlineNotifyCooldownMin"`
+			DailyReportEnabled       *bool  `json:"dailyReportEnabled"`
+			DailyReportTime          string `json:"dailyReportTime"`
+			BarkEnabled              *bool  `json:"barkEnabled"`
+			BarkKey                  string `json:"barkKey"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			writeError(w, 400, "参数错误")
@@ -380,15 +380,4 @@ func adminAuthMiddleware(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
-}
-
-// requireConfirmed 危险操作二次确认（body 需带 confirmed:true）
-func requireConfirmed(r *http.Request) bool {
-	var body struct {
-		Confirmed bool `json:"confirmed"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		return false
-	}
-	return body.Confirmed
 }

@@ -485,13 +485,6 @@ func analyzeLand(l *proto.LandInfo, now int64) (status, name string, progress in
 	return status, name, progress, timeLeft
 }
 
-func fruitCount(p *proto.PlantInfo) int64 {
-	if p == nil {
-		return 0
-	}
-	return p.FruitNum
-}
-
 // iconFor 作物名 → emoji（未知用默认 🌱）
 func iconFor(name string) string {
 
@@ -675,7 +668,7 @@ func handleBagItems(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		cat, name := classifyBagCategory(it.ID)
-		entry := itemInfoMap[int(it.ID)]
+		entry, _ := getItemByID(int(it.ID))
 		priceUnit := "金"
 		if entry.PriceID == 1005 {
 			priceUnit = "金豆豆"
@@ -775,7 +768,7 @@ func handleBagSeeds(w http.ResponseWriter, r *http.Request) {
 		}
 		// 返回背包实际拥有的全部种子（含活动种子）供"背包种子优先顺序"面板，不再排除活动种子/黑名单
 		// 仅纳入 Plant.json 收录的种子物品（无 plant 条目则跳过；交互类型为 plant 但缺配置时记日志）
-		plant, ok := seedToPlantMap[id]
+		plant, ok := getSeedPlant(id)
 		if !ok {
 			if isSeedItemID(int64(id)) {
 				log.Printf("[bag] 背包种子 %d 未收录进 Plant.json，已忽略", id)
@@ -784,9 +777,7 @@ func handleBagSeeds(w http.ResponseWriter, r *http.Request) {
 		}
 		name := plant.Name
 		// 去 "??" 后缀（('??') 处理）
-		if strings.HasSuffix(name, "??") {
-			name = name[:len(name)-2]
-		}
+		name = strings.TrimSuffix(name, "??")
 		if name == "" {
 			name = seedPlantName(int64(id))
 		}
@@ -1082,22 +1073,6 @@ func handleFriendList(w http.ResponseWriter, r *http.Request) {
 	}})
 }
 
-// countRipeLands 统计成熟且可偷（可收）的地块数
-func countRipeLands(lands []*proto.LandInfo) int {
-	n := 0
-	for _, l := range lands {
-		p := l.Plant
-		if p == nil || len(p.Phases) == 0 {
-			continue
-		}
-		cur := currentPhase(p.Phases, time.Now().Unix())
-		if cur != nil && cur.Phase == proto.PhaseMature && p.Stealable {
-			n++
-		}
-	}
-	return n
-}
-
 // handleFriendLandsRoute GET /api/friends/lands?gid=xxx  好友地块明细（真实作物图）
 // handleFriendListCacheClear 清空指定账号的好友列表展示缓存。
 func handleFriendListCacheClear(w http.ResponseWriter, r *http.Request) {
@@ -1359,7 +1334,7 @@ func handleFarmAction(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "网关未连接: "+err.Error())
 		return
 	}
-	detail := req.Action
+	var detail string
 	switch req.Action {
 	case "full": // 全部收获（is_all=true + 传全部地块 ids）
 		ids, err := allLandIDs(c, r.Context())

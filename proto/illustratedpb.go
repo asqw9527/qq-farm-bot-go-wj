@@ -4,12 +4,12 @@ package proto
 
 // IllustratedItem 图鉴条目
 type IllustratedItem struct {
-	SeedID       int64 // 图鉴返回的果实/条目ID（Node 按 seed_id 读取后当作 fruitId 处理）
+	SeedID          int64 // 图鉴返回的果实/条目ID（Node 按 seed_id 读取后当作 fruitId 处理）
 	IllustratedTier int32
-	Unlocked     bool
-	RewardScore  int32
-	HarvestCount int32
-	HasReward    bool
+	Unlocked        bool
+	RewardScore     int32
+	HarvestCount    int32
+	HasReward       bool
 }
 
 // IllustratedListReply 图鉴列表回复

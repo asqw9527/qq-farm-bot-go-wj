@@ -287,7 +287,9 @@ func buildShopSeedList(c *gw.Client) ([]seedOut, bool) {
 	}
 	level := c.Level()
 	out := make([]seedOut, 0, 32)
-	for _, g := range proto.DecodeShopInfoReply(rep.Body).GoodsList {
+	goods := proto.DecodeShopInfoReply(rep.Body).GoodsList
+	cfgMu.RLock()
+	for _, g := range goods {
 		if g.ItemID <= 0 {
 			continue
 		}
@@ -315,12 +317,15 @@ func buildShopSeedList(c *gw.Client) ([]seedOut, bool) {
 			UnknownMeta:   false,
 		})
 	}
+	cfgMu.RUnlock()
 	return out, len(out) > 0
 }
 
 // buildLocalSeedList 本地全量种子列表（商店失败回退 getAllSeeds）
 // 保留活动种子/黑名单排除，避免优先种子下拉展示商店买不到的种子。
 func buildLocalSeedList() []seedOut {
+	cfgMu.RLock()
+	defer cfgMu.RUnlock()
 	seedIDs := map[int]bool{}
 	for id, it := range itemInfoMap {
 		if it.Type == 5 && it.ID > 0 {

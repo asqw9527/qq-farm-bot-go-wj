@@ -30,12 +30,12 @@ var (
 // ThirdpartyConfig 第三方应用宝配置（与内置 YYB 互不冲突；可选 independent 重连参数）。
 // 持久化：apiToken 是敏感字段，GET 列表时由前端处理层或在线 API 路由脱敏。
 type ThirdpartyConfig struct {
-	APIBase            string `json:"apiBase"`
-	APIToken           string `json:"apiToken"`
-	OpenID             string `json:"openid"`
-	AutoReconnect      *bool  `json:"autoReconnect,omitempty"`      // nil=回退全局；true/false 覆盖
-	ReconnectDelayMin  *int   `json:"reconnectDelayMin,omitempty"`  // nil=回退全局
-	ReconnectMaxAttempts *int `json:"reconnectMaxAttempts,omitempty"` // nil=回退全局
+	APIBase              string `json:"apiBase"`
+	APIToken             string `json:"apiToken"`
+	OpenID               string `json:"openid"`
+	AutoReconnect        *bool  `json:"autoReconnect,omitempty"`        // nil=回退全局；true/false 覆盖
+	ReconnectDelayMin    *int   `json:"reconnectDelayMin,omitempty"`    // nil=回退全局
+	ReconnectMaxAttempts *int   `json:"reconnectMaxAttempts,omitempty"` // nil=回退全局
 }
 
 type Account struct {
@@ -49,7 +49,7 @@ type Account struct {
 	GID        string            `json:"gid"`
 	OpenID     string            `json:"openId"`
 	Avatar     string            `json:"avatar"`
-	Status     string            `json:"status"` // "online" / "offline"
+	Status     string            `json:"status"`               // "online" / "offline"
 	Thirdparty *ThirdpartyConfig `json:"thirdparty,omitempty"` // 第三方应用宝配置（可选）
 	CreatedAt  string            `json:"createdAt"`
 	UpdatedAt  string            `json:"updatedAt"`
@@ -314,8 +314,8 @@ func SetAutoReconnect(accountID string, enabled bool, delayMin, maxAttempts int)
 		maxAttempts = 3
 	}
 	cfg.AutoReconnect = config.AutoReconnectConfig{
-		Enabled:             enabled,
-		ReconnectDelayMin:   delayMin,
+		Enabled:              enabled,
+		ReconnectDelayMin:    delayMin,
 		ReconnectMaxAttempts: maxAttempts,
 	}
 	globalConfig.AccountConfigs[accountID] = cfg

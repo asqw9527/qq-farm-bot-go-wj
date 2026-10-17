@@ -308,7 +308,7 @@ func parseLogLine(ln string) map[string]interface{} {
 		"time": t, // "01-02 15:04:05"，前端取空格后部分显示
 		"tag":  actionTagFor(action),
 		"msg":  detail,
-		"meta": map[string]interface{}{"event": action}, // 
+		"meta": map[string]interface{}{"event": action}, //
 	}
 }
 
@@ -318,18 +318,4 @@ func actionTagFor(a string) string {
 		return v
 	}
 	return a
-}
-
-func actionColorFor(a string) string {
-	switch a {
-	case "harvest", "full":
-		return "var(--good)"
-	case "fertilize", "plant":
-		return "var(--grow)"
-	case "clear":
-		return "var(--warn)"
-	case "steal":
-		return "var(--primary)"
-	}
-	return "var(--muted)"
 }
