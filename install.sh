@@ -18,9 +18,17 @@ NODE_VER="22.20.0"
 ADMIN_PORT="${ADMIN_PORT:-3009}"
 
 # 版本时间取「代码提交到仓库的时间」（HEAD 的提交时间），而非本次编译/部署时间。
-# 无 git 环境（如源码包解压）时回退为当前时间。
+# 无 git 环境（如源码包解压）时，沿用 version.go 中已提交的时间；再兜底为当前时间。
 commit_time() {
-  git log -1 --format=%cI 2>/dev/null || date -u +%Y-%m-%dT%H:%M:%SZ
+  local t
+  t=$(git log -1 --format=%cI 2>/dev/null) || t=""
+  if [ -z "$t" ] && [ -f version.go ]; then
+    t=$(sed -n 's/^var buildTime = "\(.*\)"/\1/p' version.go 2>/dev/null)
+  fi
+  if [ -z "$t" ]; then
+    t=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  fi
+  printf '%s' "$t"
 }
 
 if [ "$(id -u)" -ne 0 ]; then
