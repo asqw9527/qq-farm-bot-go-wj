@@ -29,3 +29,7 @@ release/
 yyb-resource/
 farm-bot
 server.log
+
+# 逆向抓包/上传素材（含游戏原始资源与缓存清单，严禁入库）
+cacheList.json
+uploads/

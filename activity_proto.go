@@ -474,6 +474,7 @@ func ParseSolar(body []byte) *SolarInfo {
 			End:     actNum(t, 4),
 			Title:   actStr(t, 6),
 		}
+		term.Title = solarTermTitle(term.Title, term.Start, term.End)
 		term.Claimable = term.Status == 2
 		term.Label = solarStatusLabel(term.Status)
 		for _, r := range actBytesAll(t, 5) {
@@ -499,6 +500,53 @@ func ParseSolar(body []byte) *SolarInfo {
 		info.TipsText = actStr(readActFields(cfg), 3)
 	}
 	return info
+}
+
+// 二十四节气名称，按公历年内先后（自立春起）排列。
+var solarTermNames = [24]string{
+	"立春", "雨水", "惊蛰", "春分", "清明", "谷雨",
+	"立夏", "小满", "芒种", "夏至", "小暑", "大暑",
+	"立秋", "处暑", "白露", "秋分", "寒露", "霜降",
+	"立冬", "小雪", "大雪", "冬至", "小寒", "大寒",
+}
+
+// solarTermStartMD 各节气在公历上的常年起始日期（月, 日）。
+var solarTermStartMD = [24][2]int{
+	{2, 4}, {2, 19}, {3, 6}, {3, 21}, {4, 5}, {4, 20},
+	{5, 6}, {5, 21}, {6, 6}, {6, 21}, {7, 7}, {7, 23},
+	{8, 7}, {8, 23}, {9, 8}, {9, 23}, {10, 8}, {10, 23},
+	{11, 7}, {11, 22}, {12, 7}, {12, 22}, {1, 6}, {1, 20},
+}
+
+// solarTermNameFallback 服务端未下发 Title 时，按节令时间戳就近归位到二十四节气（北京时间）。
+func solarTermNameFallback(ts int64) string {
+	if ts <= 0 {
+		return ""
+	}
+	t := time.Unix(ts, 0).In(time.FixedZone("CST", 8*3600))
+	doy := t.YearDay()
+	best, bestDoy := -1, -1
+	for i, md := range solarTermStartMD {
+		d := time.Date(t.Year(), time.Month(md[0]), md[1], 0, 0, 0, 0, t.Location()).YearDay()
+		if d <= doy && d > bestDoy {
+			best, bestDoy = i, d
+		}
+	}
+	if best < 0 {
+		return solarTermNames[21] // 1/1–1/5 仍属上一年的「冬至」窗口
+	}
+	return solarTermNames[best]
+}
+
+// solarTermTitle 优先用服务端 Title，缺失时按 Start/End 时间推算节气名。
+func solarTermTitle(title string, start, end int64) string {
+	if title != "" {
+		return title
+	}
+	if n := solarTermNameFallback(start); n != "" {
+		return n
+	}
+	return solarTermNameFallback(end)
 }
 
 func solarStatusLabel(status int64) string {
@@ -820,6 +868,7 @@ func ParseSolarClaim(body []byte) *SolarClaimResult {
 	if t := actBytes(fs, 2); len(t) > 0 {
 		termFS := readActFields(t)
 		term := &SolarTerm{ID: actNum(termFS, 1), Status: actNum(termFS, 2), Start: actNum(termFS, 3), End: actNum(termFS, 4), Title: actStr(termFS, 6)}
+		term.Title = solarTermTitle(term.Title, term.Start, term.End)
 		term.Claimable = term.Status == 2
 		term.Label = solarStatusLabel(term.Status)
 		for _, r := range actBytesAll(termFS, 5) {
