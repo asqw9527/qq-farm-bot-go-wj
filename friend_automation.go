@@ -10,10 +10,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Aoluis1005/go-farm-bot/config"
-	"github.com/Aoluis1005/go-farm-bot/gw"
-	"github.com/Aoluis1005/go-farm-bot/models"
-	"github.com/Aoluis1005/go-farm-bot/proto"
+	"github.com/asqw9527/qq-farm-bot-go-wj/config"
+	"github.com/asqw9527/qq-farm-bot-go-wj/gw"
+	"github.com/asqw9527/qq-farm-bot-go-wj/models"
+	"github.com/asqw9527/qq-farm-bot-go-wj/proto"
 )
 
 // 极速务农(turbo)开启时：每轮最多处理的护主犬数量（用户指定 15，剩余下一轮继续）

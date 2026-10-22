@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Aoluis1005/go-farm-bot/proto"
+	"github.com/asqw9527/qq-farm-bot-go-wj/proto"
 )
 
 // 活动中心 API：
@@ -58,6 +58,10 @@ func registerActivityAPI(api *http.ServeMux) {
 
 	api.HandleFunc("/api/activity/pet/operate", handleActivityPetOperate) // S3 萌宠：投喂/寻宝/领手记/领狗/种子礼包/兑换
 	api.HandleFunc("/api/activity/pet", handleActivityPet)                // S3 萌宠：比熊之家 + 爪印手记状态
+
+	// S4 奶茶热销中：店铺面板（游记战令+原始字段树诊断）/ 领取游记档位
+	api.HandleFunc("/api/activity/milktea/shop", handleMilkTeaShop)
+	api.HandleFunc("/api/activity/milktea/claim", handleMilkTeaClaim)
 
 	// 公益小红花（CharityRedFlower）：送出爱心值/送出公益金（cmd 已抓包确认）+ 领取奖励（cmd 推断，?cmd 覆盖）
 	api.HandleFunc("/api/activity/honghua", handleHonghuaStatus)

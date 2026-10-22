@@ -16,8 +16,8 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/Aoluis1005/go-farm-bot/ace"
-	"github.com/Aoluis1005/go-farm-bot/proto"
+	"github.com/asqw9527/qq-farm-bot-go-wj/ace"
+	"github.com/asqw9527/qq-farm-bot-go-wj/proto"
 )
 
 // Node 默认微信 UA

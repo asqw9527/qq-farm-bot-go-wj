@@ -4,8 +4,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Aoluis1005/go-farm-bot/gw"
-	"github.com/Aoluis1005/go-farm-bot/proto"
+	"github.com/asqw9527/qq-farm-bot-go-wj/gw"
+	"github.com/asqw9527/qq-farm-bot-go-wj/proto"
 )
 
 // ============================================================

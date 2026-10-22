@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Aoluis1005/go-farm-bot/config"
-	"github.com/Aoluis1005/go-farm-bot/models"
+	"github.com/asqw9527/qq-farm-bot-go-wj/config"
+	"github.com/asqw9527/qq-farm-bot-go-wj/models"
 )
 
 // ============================================================

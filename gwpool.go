@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Aoluis1005/go-farm-bot/gw"
-	"github.com/Aoluis1005/go-farm-bot/models"
+	"github.com/asqw9527/qq-farm-bot-go-wj/gw"
+	"github.com/asqw9527/qq-farm-bot-go-wj/models"
 )
 
 // ClientPool 网关连接池：按账号缓存已登录的网关连接

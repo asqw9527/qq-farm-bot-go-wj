@@ -24,6 +24,7 @@ type AutomationConfig struct {
 	FertilizerBuyOrganic    bool     `json:"fertilizer_buy_organic"`     // 自动购买有机化肥
 	FertilizerBuyNormal     bool     `json:"fertilizer_buy_normal"`      // 自动购买无机化肥
 	MysteryAutoBuy          bool     `json:"mystery_auto_buy"`           // 神秘商人自动购买
+	MilkTeaAutoClaim        bool     `json:"milk_tea_auto_claim"`        // 奶茶游记经营收益自动收取
 	Sell                    bool     `json:"sell"`                       // 自动卖果实
 	Fertilizer              string   `json:"fertilizer"`                 // 施肥模式 (smart_normal/smart_only/both/organic...)
 	FertilizerMultiSeason   bool     `json:"fertilizer_multi_season"`    // 多季补肥

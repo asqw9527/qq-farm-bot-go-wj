@@ -71,6 +71,15 @@ async function addByCode() {
 
 /* ---------- 扫码登录 YYB ---------- */
 const qrUrl = ref(''); const qrMsg = ref(''); const qrBusy = ref(false)
+// 扫码渠道切换：wx = 微信（当前游戏网关链路仅支持微信区）；qq = 预留位，引导用手动 code 接入
+const qrType = ref('wx')
+const QR_CHS = [{ v: 'wx', l: '微信' }, { v: 'qq', l: 'QQ' }]
+function switchQrType(t) {
+  if (qrType.value === t) return
+  qrType.value = t
+  stopQr(); qrUrl.value = ''; qrMsg.value = ''
+  if (t === 'wx') startQrLogin()
+}
 let qrTimer = null
 let qrSeq = 0
 function stopQr() {
@@ -112,14 +121,14 @@ async function startQrLogin() {
   let sessionId = null
   try {
     // 1. 拉二维码
-    const { data } = await api.post('/api/yyb/qr/create', {}, { timeout: 60000 })
+    const { data } = await api.post('/api/yyb/qr/create', { type: qrType.value }, { timeout: 60000 })
     if (seq !== qrSeq) return
     if (!(data?.ok && data?.data)) { _qrStatus('获取二维码失败: ' + (data?.error || '未知')); qrBusy.value = false; return }
     const d = data.data
     sessionId = d.session_id
     if (!sessionId) { _qrStatus('后端未返回 session_id'); qrBusy.value = false; return }
     qrUrl.value = _renderQrImg(d.image_base64 || d.image_url || '')
-    _qrStatus('请使用手机 QQ / 应用宝扫描')
+    _qrStatus('请使用手机微信扫描（此二维码为微信登录码，用 QQ 扫无效）')
 
     // 2. 轮询（顺序请求，上限 3 分钟）
     const deadline = Date.now() + 180000
@@ -437,10 +446,34 @@ onUnmounted(() => { stopQr(); window.removeEventListener('account-switched', onA
     <div class="handle"></div>
     <h3>📱 扫码登录</h3>
     <div style="display:flex;flex-direction:column;align-items:center;padding:16px 0;width:100%;max-height:calc(85dvh - 170px);overflow-y:auto;overflow-x:hidden">
-      <img v-if="qrUrl" :src="qrUrl" style="width:150px;height:150px;border-radius:12px;background:#fff;object-fit:contain">
-      <p v-else-if="qrBusy" style="color:var(--muted)">获取二维码中…</p>
-      <p v-else style="color:var(--muted)">点击下方按钮获取二维码</p>
-      <p v-if="qrMsg" style="font-size:12px;color:var(--muted);margin-top:8px;text-align:center">{{ qrMsg }}</p>
+      <!-- 微信 / QQ 渠道切换 -->
+      <div style="display:flex;gap:8px;margin-bottom:12px">
+        <button v-for="ch in QR_CHS" :key="ch.v" class="chip" :class="{ on: qrType === ch.v }" @click="switchQrType(ch.v)">{{ ch.l }}</button>
+      </div>
+
+      <!-- 微信扫码（当前唯一可用的扫码链路） -->
+      <template v-if="qrType === 'wx'">
+        <img v-if="qrUrl" :src="qrUrl" style="width:150px;height:150px;border-radius:12px;background:#fff;object-fit:contain">
+        <p v-else-if="qrBusy" style="color:var(--muted)">获取二维码中…</p>
+        <p v-else style="color:var(--muted)">点击下方按钮获取二维码</p>
+        <p v-if="qrMsg" style="font-size:12px;color:var(--muted);margin-top:8px;text-align:center">{{ qrMsg }}</p>
+        <p style="font-size:11px;color:var(--muted);margin-top:6px;text-align:center;max-width:280px;line-height:1.6">
+          提示：若手机提示「登录地异常」，为微信安全风控（二维码由服务器 IP 生成，与手机所在地不一致），在手机上点「仍要继续 / 确认登录」即可；若被要求强制验证，请换常用网络环境重试。
+        </p>
+      </template>
+
+      <!-- QQ 渠道：游戏网关链路暂不支持 QQ 区，引导走手动 code / 第三方登录 -->
+      <template v-else>
+        <div style="width:100%;max-width:320px;background:var(--panel,#f7f8fa);border:1px solid var(--border,#e5e7eb);border-radius:12px;padding:14px;font-size:13px;line-height:1.8">
+          <b>QQ 扫码登录暂未开放</b><br>
+          当前游戏网关链路仅支持<b>微信区</b>账号（微信小程序登录换 code），QQ 区账号无法通过扫码接入。<br>
+          如需添加 <b>QQ 区</b>账号，请使用：
+          <div style="display:flex;gap:8px;margin-top:10px">
+            <button class="chip" @click="addPlatform='qq'; sheet='add'; stopQr()">🔑 手动添加 code（QQ）</button>
+            <button class="chip" @click="sheet='thirdparty'; t3rdErr=''; stopQr()">🔗 第三方登录</button>
+          </div>
+        </div>
+      </template>
     </div>
 
     <!-- 掉线自动重连 -->

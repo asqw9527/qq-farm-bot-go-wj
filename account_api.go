@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Aoluis1005/go-farm-bot/models"
+	"github.com/asqw9527/qq-farm-bot-go-wj/models"
 	"yyb_go/embed"
 )
 
@@ -611,6 +611,12 @@ func handleYybQRCreate(w http.ResponseWriter, r *http.Request) {
 	var body map[string]interface{}
 	json.NewDecoder(r.Body).Decode(&body)
 	apiBase, apiKey := resolveYybCreds(body)
+
+	// 渠道参数：wx=微信扫码（当前唯一支持的链路）；qq=预留，游戏网关仅支持微信区
+	if t, _ := body["type"].(string); t == "qq" {
+		writeError(w, 501, "QQ 扫码登录暂未实现：当前游戏网关链路仅支持微信区账号（login_type=WX），QQ 账号请使用「手动添加 code」或「第三方登录」接入")
+		return
+	}
 
 	result, err := callYybAPI(apiBase, "/qr?as_base64=true", apiKey, "POST", nil)
 	if err != nil {

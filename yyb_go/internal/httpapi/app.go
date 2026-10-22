@@ -211,6 +211,11 @@ func (a *App) handleQRRoot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.pruneQR()
+	// 渠道参数：wx=微信扫码（当前唯一支持的链路）；qq=预留，游戏网关仅支持微信区
+	if r.URL.Query().Get("type") == "qq" {
+		writeError(w, http.StatusNotImplemented, "QQ 扫码登录暂未实现：当前游戏网关链路仅支持微信区账号（login_type=WX），QQ 账号请使用「手动添加 code」或「第三方登录」接入")
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), a.cfg.RequestTimeout+35*time.Second)
 	defer cancel()
 	img, err := a.qr.GetQRCodeImage(ctx)

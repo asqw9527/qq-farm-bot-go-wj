@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Aoluis1005/go-farm-bot/models"
+	"github.com/asqw9527/qq-farm-bot-go-wj/models"
 )
 
 // registerUserAPI 注册多用户系统API路由

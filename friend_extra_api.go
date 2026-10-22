@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/Aoluis1005/go-farm-bot/models"
-	"github.com/Aoluis1005/go-farm-bot/proto"
+	"github.com/asqw9527/qq-farm-bot-go-wj/models"
+	"github.com/asqw9527/qq-farm-bot-go-wj/proto"
 )
 
 func registerFriendExtraAPI(mux *http.ServeMux) {

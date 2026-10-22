@@ -1,6 +1,7 @@
-# QQ农场自动化助手（纯AI零人工）
+# qq-farm-bot-go-wj · QQ农场自动化助手（纯AI零人工）
 
-本项目为二改，原项目：https://github.com/Aoluis1005/QQ-farm-BOT-GO
+本项目基于二改：原项目 https://github.com/Aoluis1005/QQ-farm-BOT-GO ，上游二改 https://github.com/wuyoukeji8888-stack/qq-farm-bot-go-wy
+本仓库（asqw9527/qq-farm-bot-go-wj）在二改基础上新增：扫码登录微信/QQ 渠道切换、S4 奶茶店铺面板（奶茶热销中）、奶茶经营收益自动收取。
 
 ## 功能亮点
 

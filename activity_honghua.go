@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Aoluis1005/go-farm-bot/proto"
+	"github.com/asqw9527/qq-farm-bot-go-wj/proto"
 )
 
 // ===== 公益小红花（CharityRedFlower）活动 =====

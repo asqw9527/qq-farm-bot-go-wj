@@ -28,6 +28,10 @@ const petState = reactive({ data: null, err: '' })
 const petBusy = ref(false)
 const qmState = reactive({ activity: {}, reward: {}, material: {}, err: '' })
 
+/* ---------- 奶茶店铺（S4 奶茶热销中） ---------- */
+const MILK_TEA_PREFIX = 20261101
+const milkTea = reactive({ data: null, err: '', auto: false, showTree: false, busy: false })
+
 /* ---------- 鹊桥寄情（QiXi） ---------- */
 const QIXI_ROOT_ID = 2026081800
 const QIXI_INFO_ID = 2026081801
@@ -736,6 +740,7 @@ async function loadGroup(group) {
       pl.push({ key: 'stories', title: (theme && theme.stories) || '成长手记', icon: '🐾' })
     }
     if (season && season.passport) pl.push({ key: 'season', title: season.passport.title || (theme && theme.name) || '游记战令', icon: '🗺️' })
+    if (Math.floor(group.id / 100) === MILK_TEA_PREFIX) pl.push({ key: 'milktea', title: '奶茶店铺', icon: '🧋' })
     if (giftNode) pl.push({ key: 'gift', title: (theme && theme.gift) || '每日赠礼', icon: '🌟' })
     if (shopNode) pl.push({ key: 'shop', title: (theme && theme.shop) || '兑换商店', icon: '🛍️' })
     if (solar && solar.terms && solar.terms.length) pl.push({ key: 'solar', title: '节令小礼', icon: '🌿' })
@@ -759,6 +764,7 @@ async function renderPanel(p) {
   if (p.key === 'shop') await loadShop()
   else if (p.key === 'gift') await loadGift()
   else if (p.key === 'pet' || p.key === 'stories') await loadPet()
+  else if (p.key === 'milktea') await loadMilkTea()
 }
 
 /* ---------- 比熊之家 / 爪印手记（S3 萌宠成长日记，同一份数据） ---------- */
@@ -954,6 +960,58 @@ async function claimSeason() {
   } catch (e) { loading.value = false; app.error('领取失败') }
 }
 
+/* ---------- 奶茶店铺（S4 奶茶热销中） ---------- */
+async function loadMilkTea() {
+  const a = acc(); if (!a) return
+  milkTea.err = ''
+  try {
+    const { data } = await api.get('/api/activity/milktea/shop', { params: { accountId: a } })
+    if (data && data.ok) {
+      milkTea.data = data
+      milkTea.auto = !!data.auto_claim
+    } else {
+      milkTea.err = (data && data.error) || '加载失败'
+    }
+  } catch (e) { milkTea.err = '加载失败' }
+}
+
+async function claimMilkTea() {
+  const a = acc(); if (!a) return
+  milkTea.busy = true
+  try {
+    const { data } = await api.post('/api/activity/milktea/claim', null, { params: { accountId: a } })
+    if (!(data && data.ok)) { app.error((data && data.error) || '领取失败'); return }
+    app.success(`已领取 ${data.claimed || 0} 档游记奖励`)
+    await loadMilkTea()
+  } catch (e) { app.error('领取失败') }
+  milkTea.busy = false
+}
+
+async function toggleMilkTeaAuto() {
+  try {
+    const s = (await api.get('/api/settings')).data
+    const aut = (s && s.data && s.data.automation) || {}
+    aut.milk_tea_auto_claim = !!milkTea.auto
+    const { data } = await api.post('/api/automation', aut)
+    if (!(data && data.ok)) throw new Error()
+    app.success(milkTea.auto ? '已开启自动收取（每 30 分钟一轮）' : '已关闭自动收取')
+  } catch (e) {
+    milkTea.auto = !milkTea.auto
+    app.error('保存失败')
+  }
+}
+
+function fmtRevenue(v) {
+  const x = Number(v) || 0
+  return x >= 10000 ? (x / 10000).toFixed(1) + ' 万' : String(x)
+}
+
+function copyMilkTeaTree() {
+  const t = milkTea.data && milkTea.data.tree
+  if (!t) return
+  navigator.clipboard.writeText(JSON.stringify(t, null, 1)).then(() => app.success('已复制协议字段树'))
+}
+
 /* ---------- 节令小礼 领取 ---------- */
 async function claimSolar(t) {
   loading.value = true
@@ -1066,6 +1124,87 @@ onUnmounted(() => { window.removeEventListener('account-switched', onSwitched) }
         </div>
       </template>
       <div v-else class="act-empty">该活动暂无可展示的面板</div>
+    </div>
+
+    <!-- ===== 奶茶店铺（S4 奶茶热销中） ===== -->
+    <div v-else-if="curPanel && curPanel.key === 'milktea'">
+      <template v-if="milkTea.data">
+        <!-- 店铺信息（对标游戏内奶茶店界面） -->
+        <div class="act-card">
+          <div class="act-card-hd">
+            <h4>🧋 {{ (milkTea.data.activity && milkTea.data.activity.title) || '奶茶店铺' }}</h4>
+            <span class="act-badge" v-if="view.season && view.season.passport">店铺等级 Lv.{{ n(view.season.passport.current_level) }}/{{ n(view.season.passport.max_level) }}</span>
+          </div>
+          <div class="act-stats">
+            <span>累计营业额 <b>{{ milkTea.data.shop ? fmtRevenue(milkTea.data.shop.revenue_total) : '—' }}</b></span>
+            <span>销售额 <b>{{ milkTea.data.shop ? fmtRevenue(milkTea.data.shop.revenue_sales) : '—' }}</b></span>
+            <span>营业速度 <b>{{ milkTea.data.shop && milkTea.data.shop.revenue_speed ? milkTea.data.shop.revenue_speed + '/h' : '—' }}</b></span>
+          </div>
+          <div class="act-hint" v-if="!milkTea.data.shop">营业额 / 销售额 / 营业速度为游戏内店铺独有数据，协议字段号待抓包映射（展开下方「协议诊断」复制字段树发给我即可完成映射）</div>
+        </div>
+
+        <!-- 员工列表 -->
+        <div class="act-card" v-if="milkTea.data.employees && milkTea.data.employees.length">
+          <div class="act-card-hd"><h4>👥 员工（{{ milkTea.data.employees.length }}）</h4></div>
+          <div v-for="(e, i) in milkTea.data.employees" :key="i" class="act-tier">
+            <span class="lv">👤 {{ e.name || ('员工' + (i + 1)) }}</span>
+            <span class="rw">
+              <em>特长：{{ e.skill || '—' }}</em>
+              <em>工作时长：{{ e.work_hours || '—' }}</em>
+              <em>互动收益：{{ e.interact_income || '—' }}</em>
+            </span>
+          </div>
+        </div>
+
+        <!-- 游记经营进度（奶茶游记 = 战令） -->
+        <div class="act-card" v-if="view.season && view.season.passport">
+          <div class="act-card-hd">
+            <h4>🗺️ {{ view.season.passport.title || '奶茶游记' }}</h4>
+            <span class="act-badge">等级 {{ n(view.season.passport.current_level) }}/{{ n(view.season.passport.max_level) }}</span>
+          </div>
+          <div class="act-stats">
+            <span>积分 <b>{{ n(view.season.passport.score) }}</b></span>
+            <span>可领 <b>{{ n(view.season.passport.claimable_levels) }} 档</b></span>
+            <span>进度 <b>{{ n(view.season.passport.current_progress) }}</b></span>
+          </div>
+          <div class="bar-track"><div class="bar-fill" :style="{ width: (n(view.season.passport.max_level) > 0 ? Math.min(100, Math.round(n(view.season.passport.current_level) / n(view.season.passport.max_level) * 100)) : 0) + '%' }"></div></div>
+          <div class="act-hint">距下一级还需 {{ n(view.season.passport.next_level_need) }} 积分</div>
+        </div>
+
+        <!-- 操作 -->
+        <div class="act-actions">
+          <button class="act-btn" :class="{ disabled: milkTea.busy || !(view.season && view.season.passport && n(view.season.passport.claimable_levels) > 0) }" :disabled="milkTea.busy || !(view.season && view.season.passport && n(view.season.passport.claimable_levels) > 0)" @click="claimMilkTea">领取经营收益 ({{ view.season && view.season.passport ? n(view.season.passport.claimable_levels) : 0 }} 档)</button>
+        </div>
+        <div class="act-card">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+            <input type="checkbox" v-model="milkTea.auto" @change="toggleMilkTeaAuto">
+            <span>自动收取经营收益（每 30 分钟一轮，后台自动领取可领档位）</span>
+          </label>
+        </div>
+
+        <!-- 兑换商店 -->
+        <div class="act-card" v-if="(milkTea.data.exchange_shop || []).length">
+          <div class="act-card-hd"><h4>🛍️ 兑换商店（{{ milkTea.data.exchange_shop.length }}）</h4></div>
+          <div v-for="(it, i) in milkTea.data.exchange_shop" :key="i" class="act-tier">
+            <span class="lv"><img v-if="it.image" class="act-ic-sm" :src="it.image" alt="" loading="lazy" @error="$event.target.remove()"> {{ it.name || ('#' + it.id) }}</span>
+            <span class="rw"><em>{{ it.status_label || '' }}</em><em v-if="it.price"> {{ it.price }} {{ it.currency_name || '' }}</em></span>
+          </div>
+        </div>
+
+        <!-- 协议诊断 -->
+        <div class="act-card">
+          <div class="act-card-hd">
+            <h4>🔧 协议诊断</h4>
+            <span style="display:flex;gap:8px">
+              <button v-if="milkTea.data.tree" class="act-btn" style="padding:2px 10px;font-size:12px" @click="copyMilkTeaTree">复制字段树</button>
+              <button class="act-btn" style="padding:2px 10px;font-size:12px" @click="milkTea.showTree = !milkTea.showTree">{{ milkTea.showTree ? '收起' : '展开' }}</button>
+            </span>
+          </div>
+          <div class="act-hint">店铺等级 / 累计营业额 / 销售额 / 营业速度 / 员工数据藏在游戏网关回包的未映射字段中。展开后把字段树复制发给开发者，即可完成最终映射。</div>
+          <pre v-if="milkTea.showTree && milkTea.data.tree" style="max-height:300px;overflow:auto;font-size:11px;white-space:pre-wrap;word-break:break-all;margin:8px 0 0">{{ JSON.stringify(milkTea.data.tree, null, 1) }}</pre>
+        </div>
+      </template>
+      <div v-else class="act-empty">{{ milkTea.err || '加载中…' }}</div>
     </div>
 
     <!-- ===== 节令小礼 ===== -->

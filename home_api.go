@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/Aoluis1005/go-farm-bot/models"
+	"github.com/asqw9527/qq-farm-bot-go-wj/models"
 )
 
 func registerHomeAPI(mux *http.ServeMux) {

@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Aoluis1005/go-farm-bot/gw"
-	"github.com/Aoluis1005/go-farm-bot/proto"
+	"github.com/asqw9527/qq-farm-bot-go-wj/gw"
+	"github.com/asqw9527/qq-farm-bot-go-wj/proto"
 )
 
 // friendService 好友服务名（gamepb.friendpb.FriendService）

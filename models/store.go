@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Aoluis1005/go-farm-bot/config"
+	"github.com/asqw9527/qq-farm-bot-go-wj/config"
 )
 
 // ============================================================
@@ -195,6 +195,8 @@ func SetAutomation(accountID string, key string, value bool) error {
 		cfg.Automation.FriendHelp = value
 	case "task":
 		cfg.Automation.Task = value
+	case "milk_tea_auto_claim":
+		cfg.Automation.MilkTeaAutoClaim = value
 	default:
 		return fmt.Errorf("unknown automation key: %s", key)
 	}

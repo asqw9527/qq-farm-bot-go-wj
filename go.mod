@@ -1,4 +1,4 @@
-module github.com/Aoluis1005/go-farm-bot
+module github.com/asqw9527/qq-farm-bot-go-wj
 
 go 1.25.0
 
