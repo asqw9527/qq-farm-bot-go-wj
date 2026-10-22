@@ -36,17 +36,52 @@
 | `/api/admin/cards` | GET/POST | 管理员卡密列表、生成、启用/禁用、删除 |
 | `/api/admin/users` | GET/POST/DELETE | 管理员用户列表、修改时限/上限、重置密码、删除 |
 
+### 安全加固（传输加密 + 账号数据加密）
+
+**① 传输加密（HTTPS/TLS）**
+
+管理面板默认以明文 HTTP 提供，登录口令与账号凭据会明文传输。现已支持 TLS：
+
+| 方式 | 配置 | 说明 |
+|------|------|------|
+| 正式证书（推荐） | `ADMIN_TLS_CERT=/path/cert.pem` + `ADMIN_TLS_KEY=/path/key.pem` | 可由 Let's Encrypt / 云厂商签发，或前置 Nginx 反代 HTTPS |
+| 自签名证书 | `ADMIN_TLS_AUTO=1` | 首次启动在数据目录生成 `cert.pem` / `key.pem`（权限 0600），5 年有效；浏览器首次访问需手动信任 |
+| 不启用 | 都不设置 | 仍以 HTTP 启动，日志会打印明文告警 |
+
+`install.sh` 部署时已在 systemd 单元写入 `Environment=ADMIN_TLS_AUTO=1`，即默认 HTTPS。自签名证书可用 `-k` 验证：
+
+```bash
+curl -sk https://127.0.0.1:3009/api/health
+```
+
+**② accounts.json 落盘加密（AES-256-GCM）**
+
+账号的 `Code`、`apiToken`、`openId`、`uin` 等敏感字段不再明文落盘，改为加密信封：
+
+```json
+{ "v": 1, "encrypted": "<base64(nonce|ciphertext)>" }
+```
+
+密钥来源（按优先级）：
+
+1. 环境变量 `QQ_FARM_ENC_KEY`（32 字节，hex 64 字符或 base64）——**生产推荐**；
+2. 数据目录 `.enckey` 文件，首次运行随机生成，权限 `0600`。
+
+> ⚠️ **务必备份 `.enckey`**：密钥丢失将无法解密已保存的账号。旧的明文 `accounts.json` 会在首次启动时自动迁移为加密格式，无需手工处理。
+
+建议同时收紧数据目录权限：`chmod 700 ~/.qq-farm-bot`。
+
 ### 一键部署（推荐，Rocky Linux 9.6 / Debian / Ubuntu）
 
 root 执行即可。Rocky 9 走 dnf，脚本会安装 Go 1.25 与 Node 22、2G 机自动加 1G swap、编译前后端、装到 `/opt/go-farm-bot`、注册 systemd、放行 3009。
 
 ```bash
-git clone https://github.com/wuyoukeji8888-stack/qq-farm-bot-go-wy.git
-cd qq-farm-bot-go-wy
+git clone https://github.com/asqw9527/qq-farm-bot-go-wj.git
+cd qq-farm-bot-go-wj
 bash install.sh
 ```
 
-部署完成后打开 **`http://<服务器 IP>:3009`**，注意云厂商安全组也要放行 TCP 3009。
+部署完成后打开 **`https://<服务器 IP>:3009`**（自签名证书需手动信任），注意云厂商安全组也要放行 TCP 3009。
 
 **后续更新**同样是这两步，脚本会自己先停服务再覆盖、装完自动拉起，不用手动 `systemctl stop`：
 

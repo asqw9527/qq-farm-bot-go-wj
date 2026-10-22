@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"crypto/tls"
 	goembed "embed"
 	"encoding/hex"
 	"encoding/json"
@@ -215,16 +216,23 @@ func main() {
 	})
 
 	addr := fmt.Sprintf("0.0.0.0:%d", adminPort)
+	certPath, keyPath, tlsOn := adminTLS(dataDir)
 	srv := &http.Server{
 		Addr:              addr,
 		Handler:           mux,
 		ReadHeaderTimeout: 15 * time.Second, // 防慢速请求头（slowloris）
 		ReadTimeout:       90 * time.Second,
 		IdleTimeout:       120 * time.Second,
+		TLSConfig:         &tls.Config{MinVersion: tls.VersionTLS12},
 		// 不设 WriteTimeout：部分管理接口（配置/素材同步）单次处理可能较长，
 		// 其内部已由 adminAuthMiddleware 注入 120s context 超时兜底。
 	}
-	log.Printf("[admin] QQ Farm Bot Go · http://localhost:%d", adminPort)
+	if tlsOn {
+		log.Printf("[admin] QQ Farm Bot Go · https://localhost:%d（TLS 已启用）", adminPort)
+	} else {
+		log.Printf("[admin] QQ Farm Bot Go · http://localhost:%d", adminPort)
+		log.Printf("[admin] %s", tlsHint())
+	}
 
 	// 优雅退出：收到 SIGINT/SIGTERM 后停止接收新连接并等待在途请求结束。
 	shutdownDone := make(chan struct{})
@@ -241,8 +249,14 @@ func main() {
 		close(shutdownDone)
 	}()
 
-	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Fatalf("[admin] failed to start: %v", err)
+	var serveErr error
+	if tlsOn {
+		serveErr = srv.ListenAndServeTLS(certPath, keyPath)
+	} else {
+		serveErr = srv.ListenAndServe()
+	}
+	if serveErr != nil && serveErr != http.ErrServerClosed {
+		log.Fatalf("[admin] failed to start: %v", serveErr)
 	}
 	<-shutdownDone
 	// 主循环退出后关闭内置 YYB 服务

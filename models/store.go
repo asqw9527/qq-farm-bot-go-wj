@@ -2,7 +2,9 @@ package models
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -59,6 +61,8 @@ type Account struct {
 func InitStore(dir string) {
 	dataDir = dir
 	os.MkdirAll(dataDir, 0755)
+	// 账号敏感数据落盘加密的密钥必须在读 accounts.json 之前就绪
+	loadEncryptionKey()
 	globalConfig = config.DefaultGlobalConfig()
 	loadGlobalConfig()
 	loadAccounts()
@@ -326,25 +330,52 @@ func SetAutoReconnect(accountID string, enabled bool, delayMin, maxAttempts int)
 
 // ---- 账号管理 ----
 
+// loadAccounts 读取 accounts.json。优先按加密信封解析；若为旧版明文则读入后
+// 立即以加密格式重写（自动迁移），自此明文 Code/apiToken/openId/uin 不再落盘。
 func loadAccounts() {
 	filePath := accountsFilePath()
-	var data struct {
-		Accounts []Account `json:"accounts"`
-	}
-	if err := readJSONFile(filePath, &data); err != nil {
+	raw, err := os.ReadFile(filePath)
+	if err != nil {
 		accounts = []Account{}
 		return
 	}
-	accounts = data.Accounts
+	var data struct {
+		Accounts []Account `json:"accounts"`
+	}
+	if decErr := decryptJSON(raw, &data); decErr == nil {
+		accounts = data.Accounts
+	} else if errors.Is(decErr, ErrNotEncrypted) {
+		// 旧版明文文件：兼容读取 → 加密迁移
+		if jsonErr := json.Unmarshal(raw, &data); jsonErr == nil {
+			accounts = data.Accounts
+			if len(accounts) > 0 {
+				if sErr := saveAccounts(); sErr != nil {
+					log.Printf("[crypto] accounts.json 加密迁移失败: %v", sErr)
+				} else {
+					log.Printf("[crypto] accounts.json 已从明文格式迁移为加密存储（%d 个账号）", len(accounts))
+				}
+			}
+		} else {
+			accounts = []Account{}
+		}
+	} else {
+		log.Printf("[crypto] accounts.json 解密失败: %v", decErr)
+		accounts = []Account{}
+	}
 	if accounts == nil {
 		accounts = []Account{}
 	}
 }
 
+// saveAccounts 以 AES-256-GCM 加密信封持久化账号（原明文 JSON 写盘已废弃）。
 func saveAccounts() error {
-	return writeJSONFileAtomic(accountsFilePath(), struct {
+	body, err := encryptJSON(struct {
 		Accounts []Account `json:"accounts"`
 	}{Accounts: accounts})
+	if err != nil {
+		return err
+	}
+	return writeEncFileAtomic(accountsFilePath(), body)
 }
 
 // GetAccounts 获取所有账号

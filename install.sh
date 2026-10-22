@@ -254,6 +254,9 @@ ExecStart=/opt/go-farm-bot/go-farm-bot
 Environment=ADMIN_PORT=${ADMIN_PORT}
 Environment=HOME=${DATA_HOME}
 Environment=GOPROXY=https://goproxy.cn,direct
+# 传输加密：默认生成自签名证书走 HTTPS（浏览器首次访问需手动信任）。
+# 使用正式证书时改为：Environment=ADMIN_TLS_CERT=/path/cert.pem 与 ADMIN_TLS_KEY=/path/key.pem，并删除下行。
+Environment=ADMIN_TLS_AUTO=1
 Restart=on-failure
 RestartSec=5
 LimitNOFILE=65535
@@ -279,15 +282,22 @@ fi
 echo "[6/6] 检查服务..."
 sleep 2
 systemctl --no-pager --full status go-farm-bot | head -20 || true
-if curl -fsS "http://127.0.0.1:${ADMIN_PORT}/api/health" >/dev/null 2>&1; then
-  echo "  health 检查通过"
+if curl -fsSk "https://127.0.0.1:${ADMIN_PORT}/api/health" >/dev/null 2>&1; then
+  echo "  health 检查通过（HTTPS）"
+elif curl -fsS "http://127.0.0.1:${ADMIN_PORT}/api/health" >/dev/null 2>&1; then
+  echo "  health 检查通过（HTTP，未启用 TLS）"
 else
-  echo "  health 暂未就绪，稍后执行: curl -s http://127.0.0.1:${ADMIN_PORT}/api/health"
+  echo "  health 暂未就绪，稍后执行: curl -sk https://127.0.0.1:${ADMIN_PORT}/api/health"
 fi
 
 IP=$(hostname -I 2>/dev/null | awk '{print $1}')
 echo ""
 echo "部署完成"
-echo "访问地址: http://${IP:-103.117.136.113}:${ADMIN_PORT}"
+echo "访问地址: https://${IP:-103.117.136.113}:${ADMIN_PORT}（自签名证书，浏览器需手动信任）"
+echo ""
+echo "安全提示："
+echo "  1) 立即登录后台修改默认口令 admin/admin"
+echo "  2) accounts.json 已加密存储，密钥在 \${DATA_HOME}/.enckey（权限 0600），请妥善备份，丢失无法解密"
+echo "  3) 生产建议改用正式证书（ADMIN_TLS_CERT/ADMIN_TLS_KEY）或前置 Nginx 反代 HTTPS"
 echo "后续更新:  git pull && bash install.sh"
 echo "日志查看:  journalctl -u go-farm-bot -f"
