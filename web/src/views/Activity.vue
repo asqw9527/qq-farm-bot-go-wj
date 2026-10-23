@@ -1012,6 +1012,31 @@ async function mtProbeSend() {
   }
 }
 
+// 扫描节点 cmd（1-12）：批量发 Operate，结果下载为 milktea-sweep.json
+async function mtSweepCmds() {
+  const a = acc(); if (!a) return
+  if (!Number(mtProbe.id)) { app.error('请先填节点 id'); return }
+  mtProbe.busy = true
+  try {
+    const { data } = await api.post('/api/activity/milktea/probe', {
+      accountId: a, sweep: true, id: Number(mtProbe.id) || 0, cmds: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+    })
+    mtProbe.result = JSON.stringify(data, null, 1)
+    const blob = new Blob([JSON.stringify(data, null, 1)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const el = document.createElement('a')
+    el.href = url
+    el.download = 'milktea-sweep.json'
+    el.click()
+    URL.revokeObjectURL(url)
+    app.success('扫描完成，结果已下载')
+  } catch (e) {
+    app.error('扫描失败')
+  } finally {
+    mtProbe.busy = false
+  }
+}
+
 // 下载奶茶面板完整诊断 JSON（节点载荷/f121 原始树/字段树），便于离线对照映射
 async function downloadMilkTeaDiag() {
   const a = acc(); if (!a) return
@@ -1208,6 +1233,7 @@ onUnmounted(() => { window.removeEventListener('account-switched', onSwitched) }
             <input v-model="mtProbe.ext_field" placeholder="ext字段号(选填)" style="width:120px;padding:4px 8px;font-size:12px;border:1px solid #d9d9d9;border-radius:6px">
             <input v-model="mtProbe.ext_hex" placeholder="ext hex(选填，如 0801)" style="width:150px;padding:4px 8px;font-size:12px;border:1px solid #d9d9d9;border-radius:6px">
             <button class="act-btn" :class="{ disabled: mtProbe.busy }" :disabled="mtProbe.busy" style="padding:4px 14px;font-size:12px" @click="mtProbeSend">{{ mtProbe.busy ? '发送中…' : '发送 Operate' }}</button>
+            <button class="act-btn" :class="{ disabled: mtProbe.busy }" :disabled="mtProbe.busy" style="padding:4px 14px;font-size:12px" @click="mtSweepCmds">扫描cmd(1-12)</button>
           </div>
           <pre v-if="mtProbe.result" style="max-height:260px;overflow:auto;font-size:11px;white-space:pre-wrap;word-break:break-all;margin:8px 0 0;border:1px solid #eee;border-radius:6px;padding:8px;background:#fafafa">{{ mtProbe.result }}</pre>
           <details style="margin-top:8px">

@@ -341,11 +341,13 @@ func decodeActivityJSON(b []byte) (cfg interface{}) {
 // 等操作的真实 id/cmd 组合；探测历史记录在浏览器端，避免误发业务操作请先在诊断页确认节点。
 func handleMilkTeaProbe(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		AccountID string `json:"accountId"`
-		ID        int64  `json:"id"`
-		Cmd       int64  `json:"cmd"`
-		ExtField  int    `json:"ext_field"`
-		ExtHex    string `json:"ext_hex"`
+		AccountID string  `json:"accountId"`
+		ID        int64   `json:"id"`
+		Cmd       int64   `json:"cmd"`
+		ExtField  int     `json:"ext_field"`
+		ExtHex    string  `json:"ext_hex"`
+		Sweep     bool    `json:"sweep"`
+		Cmds      []int64 `json:"cmds"`
 	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, 8192))
 	if err == nil && len(body) > 0 {
@@ -356,6 +358,40 @@ func handleMilkTeaProbe(w http.ResponseWriter, r *http.Request) {
 		writeJSONMap(w, "ok", false, "error", "缺少 accountId")
 		return
 	}
+
+	// 扫描模式：对同一节点依次发多个 cmd，收集每个的服务端响应/报错原文
+	if req.Sweep && len(req.Cmds) > 0 {
+		if len(req.Cmds) > 24 {
+			req.Cmds = req.Cmds[:24]
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
+		defer cancel()
+		type sweepItem struct {
+			Cmd   int64       `json:"cmd"`
+			OK    bool        `json:"ok"`
+			Error string      `json:"error,omitempty"`
+			Reply interface{} `json:"reply,omitempty"`
+		}
+		results := make([]*sweepItem, 0, len(req.Cmds))
+		for _, cmd := range req.Cmds {
+			b := proto.NewBuilder()
+			b.FieldInt64(1, req.ID)
+			b.FieldInt64(2, cmd)
+			item := &sweepItem{Cmd: cmd}
+			rep, err := rpcRequest(ctx, accountID, actSvc, "Operate", b.Bytes(), 12*time.Second)
+			if err != nil {
+				item.Error = actErrMsg(err)
+			} else {
+				item.OK = true
+				st := &actTreeStats{Max: 300}
+				item.Reply = buildActTree(rep, 8, st)
+			}
+			results = append(results, item)
+		}
+		writeJSON(w, map[string]interface{}{"ok": true, "account": accountID, "id": req.ID, "sweep": results})
+		return
+	}
+
 	sent := map[string]interface{}{"id": req.ID, "cmd": req.Cmd, "ext_field": req.ExtField, "ext_hex": req.ExtHex}
 
 	b := proto.NewBuilder()
