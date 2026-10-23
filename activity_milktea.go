@@ -256,7 +256,8 @@ func collectMilkTeaNodes(n *ActivityNode, depth int, st *actTreeStats, out *[]*m
 	}
 }
 
-// nodePayloadBrief 节点自身载荷字段树（wire2 递归展开、wire0 取值，跳过 field2/children）
+// nodePayloadBrief 节点自身载荷字段树（wire2 递归展开、wire0 取值，跳过 field2/children）。
+// info 块（field1）的 f5 是 base64 的活动 JSON 配置（如 uid=MilkTeaActivity），完整解码为对象。
 func nodePayloadBrief(raw []byte, st *actTreeStats) interface{} {
 	defer func() { _ = recover() }()
 	m := map[string]interface{}{}
@@ -264,30 +265,73 @@ func nodePayloadBrief(raw []byte, st *actTreeStats) interface{} {
 		if f.No == 2 {
 			continue
 		}
-		var val interface{}
-		switch f.Wire {
-		case 0:
-			val = f.Varint
-		case 2:
-			if st.ok() {
-				if sub := buildActTree(f.Bytes, 6, st); sub != nil {
-					st.Nodes++
-					val = sub
-				} else {
-					val = actTreeBytes(f.Bytes)
+		switch {
+		case f.Wire == 0:
+			actTreeAppend(m, "f"+strconv.Itoa(f.No), f.Varint)
+		case f.No == 1:
+			info := map[string]interface{}{}
+			for _, g := range readActFields(f.Bytes) {
+				switch {
+				case g.Wire == 0:
+					actTreeAppend(info, "f"+strconv.Itoa(g.No), g.Varint)
+				case g.No == 5:
+					if cfg := decodeActivityJSON(g.Bytes); cfg != nil {
+						actTreeAppend(info, "f5", cfg)
+						continue
+					}
+					actTreeAppend(info, "f5", actTreeBytes(g.Bytes))
+				default:
+					if st.ok() {
+						if sub := buildActTree(g.Bytes, 6, st); sub != nil {
+							st.Nodes++
+							actTreeAppend(info, "f"+strconv.Itoa(g.No), sub)
+							continue
+						}
+					}
+					actTreeAppend(info, "f"+strconv.Itoa(g.No), actTreeBytes(g.Bytes))
 				}
+			}
+			actTreeAppend(m, "f1", info)
+		case st.ok():
+			if sub := buildActTree(f.Bytes, 6, st); sub != nil {
+				st.Nodes++
+				actTreeAppend(m, "f"+strconv.Itoa(f.No), sub)
 			} else {
-				val = actTreeBytes(f.Bytes)
+				actTreeAppend(m, "f"+strconv.Itoa(f.No), actTreeBytes(f.Bytes))
 			}
 		default:
-			continue
+			actTreeAppend(m, "f"+strconv.Itoa(f.No), actTreeBytes(f.Bytes))
 		}
-		actTreeAppend(m, "f"+strconv.Itoa(f.No), val)
 	}
 	if len(m) == 0 {
 		return nil
 	}
 	return m
+}
+
+// decodeActivityJSON 尝试把字段内容按 JSON 或 base64(JSON) 解码（活动面板配置，须为 object）
+func decodeActivityJSON(b []byte) (cfg interface{}) {
+	defer func() { _ = recover() }()
+	if len(b) == 0 || len(b) > 512*1024 {
+		return nil
+	}
+	if json.Unmarshal(b, &cfg) == nil {
+		if _, ok := cfg.(map[string]interface{}); ok {
+			return cfg
+		}
+		return nil
+	}
+	dec, err := base64.StdEncoding.DecodeString(string(b))
+	if err != nil {
+		return nil
+	}
+	if json.Unmarshal(dec, &cfg) != nil {
+		return nil
+	}
+	if _, ok := cfg.(map[string]interface{}); !ok {
+		return nil
+	}
+	return cfg
 }
 
 // ----- POST /api/activity/milktea/probe 协议探测（游戏内抓包用） -----
