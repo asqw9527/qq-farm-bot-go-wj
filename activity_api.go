@@ -63,6 +63,8 @@ func registerActivityAPI(api *http.ServeMux) {
 	// 注：奶茶游记（战令）活动已下线，领取接口已删除。
 	api.HandleFunc("/api/activity/milktea/shop", handleMilkTeaShop)
 	api.HandleFunc("/api/activity/milktea/probe", handleMilkTeaProbe)
+	// 店铺「今日经营概览」真实数据：cmd 55/56/58/59/67/79（已实锤），自动定位店铺节点
+	api.HandleFunc("/api/activity/milktea/overview", handleMilkTeaOverview)
 
 	// 公益小红花（CharityRedFlower）：送出爱心值/送出公益金（cmd 已抓包确认）+ 领取奖励（cmd 推断，?cmd 覆盖）
 	api.HandleFunc("/api/activity/honghua", handleHonghuaStatus)
