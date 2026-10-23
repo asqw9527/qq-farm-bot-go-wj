@@ -1012,16 +1012,29 @@ async function mtProbeSend() {
   }
 }
 
-// 扫描节点 cmd（1-12）：批量发 Operate，结果下载为 milktea-sweep.json
+// 扫描节点 cmd：cmd 框支持「31-60」范围语法（留空=1-30），分批(≤32)发 Operate，结果下载为 milktea-sweep.json
 async function mtSweepCmds() {
   const a = acc(); if (!a) return
   if (!Number(mtProbe.id)) { app.error('请先填节点 id'); return }
+  let lo = 1, hi = 30
+  const m = String(mtProbe.cmd || '').trim().match(/^(\d+)\s*[-~]\s*(\d+)$/)
+  if (m) { lo = Number(m[1]); hi = Number(m[2]) }
+  else if (String(mtProbe.cmd || '').trim()) { lo = hi = Number(mtProbe.cmd) }
+  if (hi - lo + 1 > 128) { app.error('范围过大（最多128个）'); return }
+  const cmds = []
+  for (let c = lo; c <= hi; c++) cmds.push(c)
   mtProbe.busy = true
   try {
-    const { data } = await api.post('/api/activity/milktea/probe', {
-      accountId: a, sweep: true, id: Number(mtProbe.id) || 0, cmds: Array.from({ length: 30 }, (_, i) => i + 1),
-    })
-    mtProbe.result = JSON.stringify(data, null, 1)
+    const sweep = []
+    let last = null
+    for (let i = 0; i < cmds.length; i += 32) {
+      const { data } = await api.post('/api/activity/milktea/probe', {
+        accountId: a, sweep: true, id: Number(mtProbe.id) || 0, cmds: cmds.slice(i, i + 32),
+      })
+      if (data && Array.isArray(data.sweep)) sweep.push(...data.sweep)
+      last = data
+    }
+    mtProbe.result = JSON.stringify({ ...last, sweep }, null, 1)
     const blob = new Blob([JSON.stringify(data, null, 1)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const el = document.createElement('a')
@@ -1233,7 +1246,7 @@ onUnmounted(() => { window.removeEventListener('account-switched', onSwitched) }
             <input v-model="mtProbe.ext_field" placeholder="ext字段号(选填)" style="width:120px;padding:4px 8px;font-size:12px;border:1px solid #d9d9d9;border-radius:6px">
             <input v-model="mtProbe.ext_hex" placeholder="ext hex(选填，如 0801)" style="width:150px;padding:4px 8px;font-size:12px;border:1px solid #d9d9d9;border-radius:6px">
             <button class="act-btn" :class="{ disabled: mtProbe.busy }" :disabled="mtProbe.busy" style="padding:4px 14px;font-size:12px" @click="mtProbeSend">{{ mtProbe.busy ? '发送中…' : '发送 Operate' }}</button>
-            <button class="act-btn" :class="{ disabled: mtProbe.busy }" :disabled="mtProbe.busy" style="padding:4px 14px;font-size:12px" @click="mtSweepCmds">扫描cmd(1-12)</button>
+            <button class="act-btn" :class="{ disabled: mtProbe.busy }" :disabled="mtProbe.busy" style="padding:4px 14px;font-size:12px" @click="mtSweepCmds">扫描cmd(可填31-60)</button>
           </div>
           <pre v-if="mtProbe.result" style="max-height:260px;overflow:auto;font-size:11px;white-space:pre-wrap;word-break:break-all;margin:8px 0 0;border:1px solid #eee;border-radius:6px;padding:8px;background:#fafafa">{{ mtProbe.result }}</pre>
           <details style="margin-top:8px">
