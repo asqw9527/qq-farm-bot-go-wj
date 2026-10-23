@@ -163,7 +163,18 @@ type ActivityNode struct {
 	ExchangeShop []*ShopItem     `json:"exchange_shop,omitempty"` // field102
 	RandomShop   []*ShopItem     `json:"random_shop,omitempty"`   // field101
 	HasDraw      bool            `json:"has_draw"`                // field105
+	MilkTeaShop  *MilkTeaShop    `json:"milk_tea_shop,omitempty"` // field121（S4 奶茶热销中店铺状态）
 	DrawInfo     []byte          `json:"-"`
+}
+
+// MilkTeaShop S4 奶茶热销中：节点 field121 店铺实时状态。
+// 字段映射实锤自 2026-10-23 协议诊断树（对照游戏内截图：店铺等级 7 / 营业额 178245）：
+//
+//	f121{ f1{ f2=店铺名(string) f4=店铺等级(varint) f5=营业额(varint) } }
+type MilkTeaShop struct {
+	Name    string `json:"name"`    // 店铺名，如「奶茶冲鸭」
+	Level   int64  `json:"level"`   // 店铺等级
+	Revenue int64  `json:"revenue"` // 当前营业额
 }
 
 // --- 解析函数 ---
@@ -324,6 +335,19 @@ func parseActivityNode(raw []byte) *ActivityNode {
 	if drawRaw := actBytes(fs, 105); len(drawRaw) > 0 {
 		node.HasDraw = true
 		node.DrawInfo = drawRaw
+	}
+	// S4 奶茶店铺状态：节点 field121{1:{2:名,4:等级,5:营业额}}
+	if shopRaw := actBytes(fs, 121); len(shopRaw) > 0 {
+		if inner := actBytes(readActFields(shopRaw), 1); len(inner) > 0 {
+			sfs := readActFields(inner)
+			if s := actStr(sfs, 2); s != "" || actNum(sfs, 4) > 0 {
+				node.MilkTeaShop = &MilkTeaShop{
+					Name:    s,
+					Level:   actNum(sfs, 4),
+					Revenue: actNum(sfs, 5),
+				}
+			}
+		}
 	}
 	return node
 }

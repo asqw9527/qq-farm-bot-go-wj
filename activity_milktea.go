@@ -170,7 +170,7 @@ func handleMilkTeaShop(w http.ResponseWriter, r *http.Request) {
 		"season":  season,
 	}
 
-	// 3. 首个在期活动节点：分组树 + 兑换商店 + 原始字段树（协议映射诊断）
+	// 3. 首个在期活动节点：分组树 + 兑换商店 + 店铺实时状态 + 原始字段树（协议映射诊断）
 	if len(nodes) > 0 {
 		node := nodes[0]
 		gb, err := rpcRequest(ctx, accountID, actSvc, "GetGroup", actGroupReqBody(node.ID), 20*time.Second)
@@ -184,11 +184,14 @@ func handleMilkTeaShop(w http.ResponseWriter, r *http.Request) {
 			}
 			if tree != nil {
 				out["exchange_shop"] = tree.ExchangeShop
+				if shop := findMilkTeaShop(tree); shop != nil {
+					out["shop"] = shop
+				}
 			}
-			// 原始字段树：店铺等级/营业额/员工等字段映射的数据来源
+			// 原始字段树：累计营业额/销售额/营业速度/员工等字段映射的数据来源
 			st := &actTreeStats{Max: 4000}
 			out["tree"] = buildActTree(gb, 12, st)
-			out["tree_note"] = "原始 protobuf 字段树（f字段号）。店铺等级/营业额/营业速度/员工的字段号待抓包对照后映射。"
+			out["tree_note"] = "原始 protobuf 字段树（f字段号）。店铺名/等级/营业额已映射（f121）；累计营业额/销售额/营业速度/员工的字段号待抓包对照后补充。"
 		} else {
 			out["group_error"] = actErrMsg(err)
 		}
@@ -217,6 +220,22 @@ func actGroupReqBody(id int64) []byte {
 	b.FieldInt64(1, id)
 	b.FieldString(2, "")
 	return b.Bytes()
+}
+
+// findMilkTeaShop 递归查找活动树中第一个携带 field121 店铺状态的节点
+func findMilkTeaShop(n *ActivityNode) *MilkTeaShop {
+	if n == nil {
+		return nil
+	}
+	if n.MilkTeaShop != nil {
+		return n.MilkTeaShop
+	}
+	for _, c := range n.Children {
+		if s := findMilkTeaShop(c); s != nil {
+			return s
+		}
+	}
+	return nil
 }
 
 // ----- POST /api/activity/milktea/claim 手动领取游记档位 -----

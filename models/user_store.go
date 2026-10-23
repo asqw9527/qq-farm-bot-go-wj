@@ -302,6 +302,32 @@ func initDefaultAdmin() {
 	log.Println("[security] 已创建默认管理员账号 admin/admin，请尽快登录修改密码！")
 }
 
+// ResetAdminPassword 重置 admin 用户密码（忘记密码恢复登录用：./go-farm-bot -reset-admin[=新密码]）。
+// 不带值时重置为默认 admin；admin 用户不存在时以指定密码直接创建。执行后进程退出由调用方负责。
+func ResetAdminPassword(newPassword string) {
+	if newPassword == "" {
+		newPassword = "admin"
+	}
+	for i := range users {
+		if users[i].Username == "admin" {
+			users[i].Password = hashPassword(newPassword)
+			saveUsers()
+			log.Printf("[security] admin 密码已重置（新密码长度 %d 字符），请重新登录", len(newPassword))
+			return
+		}
+	}
+	// admin 不存在：直接以指定密码创建默认管理员
+	users = append(users, User{
+		Username:     "admin",
+		Password:     hashPassword(newPassword),
+		Role:         "admin",
+		AccountLimit: -1,
+		CreatedAt:    time.Now().UnixMilli(),
+	})
+	saveUsers()
+	log.Printf("[security] 未找到 admin 用户，已按指定密码创建 admin（密码长度 %d 字符）", len(newPassword))
+}
+
 func checkRateLimit(ip string) (allowed bool, remainingMs int64, message string) {
 	key := fmt.Sprintf("ip:%s", ip)
 	now := time.Now().UnixMilli()

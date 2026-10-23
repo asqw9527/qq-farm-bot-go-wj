@@ -69,7 +69,32 @@ func newEmbeddedYybServer() (string, func() error, error) {
 	return srv.BaseURL(), srv.Close, nil
 }
 
+// resetAdminArg 解析 -reset-admin[=新密码] 命令行参数（存在即重置并退出）
+func resetAdminArg() (password string, ok bool) {
+	for _, a := range os.Args[1:] {
+		if a == "-reset-admin" || a == "--reset-admin" {
+			return "", true
+		}
+		for _, p := range []string{"-reset-admin=", "--reset-admin="} {
+			if s, found := strings.CutPrefix(a, p); found {
+				return s, true
+			}
+		}
+	}
+	return "", false
+}
+
 func main() {
+	// -reset-admin[=新密码]：重置 admin 用户密码后退出（忘记密码恢复登录用）
+	if val, ok := resetAdminArg(); ok {
+		homeDir, _ := os.UserHomeDir()
+		dataDir = homeDir + "/.qq-farm-bot"
+		models.InitStore(dataDir)
+		models.InitUserStore(dataDir)
+		models.ResetAdminPassword(val)
+		return
+	}
+
 	homeDir, _ := os.UserHomeDir()
 	dataDir = homeDir + "/.qq-farm-bot"
 	models.InitStore(dataDir)

@@ -1132,15 +1132,17 @@ onUnmounted(() => { window.removeEventListener('account-switched', onSwitched) }
         <!-- 店铺信息（对标游戏内奶茶店界面） -->
         <div class="act-card">
           <div class="act-card-hd">
-            <h4>🧋 {{ (milkTea.data.activity && milkTea.data.activity.title) || '奶茶店铺' }}</h4>
-            <span class="act-badge" v-if="view.season && view.season.passport">店铺等级 Lv.{{ n(view.season.passport.current_level) }}/{{ n(view.season.passport.max_level) }}</span>
+            <h4>🧋 {{ (milkTea.data.shop && milkTea.data.shop.name) || (milkTea.data.activity && milkTea.data.activity.title) || '奶茶店铺' }}</h4>
+            <span class="act-badge" v-if="milkTea.data.shop">店铺等级 Lv.{{ n(milkTea.data.shop.level) }}</span>
           </div>
           <div class="act-stats">
-            <span>累计营业额 <b>{{ milkTea.data.shop ? fmtRevenue(milkTea.data.shop.revenue_total) : '—' }}</b></span>
-            <span>销售额 <b>{{ milkTea.data.shop ? fmtRevenue(milkTea.data.shop.revenue_sales) : '—' }}</b></span>
-            <span>营业速度 <b>{{ milkTea.data.shop && milkTea.data.shop.revenue_speed ? milkTea.data.shop.revenue_speed + '/h' : '—' }}</b></span>
+            <span>营业额 <b>{{ milkTea.data.shop ? fmtRevenue(milkTea.data.shop.revenue) : '—' }}</b></span>
+            <span>累计营业额 <b>{{ milkTea.data.shop && milkTea.data.shop.revenue_total ? fmtRevenue(milkTea.data.shop.revenue_total) : '—' }}</b></span>
+            <span>销售额 <b>{{ milkTea.data.shop && milkTea.data.shop.revenue_sales ? fmtRevenue(milkTea.data.shop.revenue_sales) : '—' }}</b></span>
+            <span>营业速度 <b>{{ milkTea.data.shop && milkTea.data.shop.revenue_speed ? fmtRevenue(milkTea.data.shop.revenue_speed) + '/h' : '—' }}</b></span>
           </div>
-          <div class="act-hint" v-if="!milkTea.data.shop">营业额 / 销售额 / 营业速度为游戏内店铺独有数据，协议字段号待抓包映射（展开下方「协议诊断」复制字段树发给我即可完成映射）</div>
+          <div class="act-hint" v-if="milkTea.data.shop">店铺名 / 等级 / 营业额已实锤映射（f121）；累计营业额 / 销售额 / 营业速度的字段号待补充抓包后开放；制作奶茶与领取员工收益需抓包对应操作协议。</div>
+          <div class="act-hint" v-else>店铺状态暂未获取到（活动回包未携带 field121，可能活动数据未同步）。展开下方「协议诊断」复制字段树即可继续映射。</div>
         </div>
 
         <!-- 员工列表 -->
@@ -1156,24 +1158,28 @@ onUnmounted(() => { window.removeEventListener('account-switched', onSwitched) }
           </div>
         </div>
 
-        <!-- 游记经营进度（奶茶游记 = 战令） -->
-        <div class="act-card" v-if="view.season && view.season.passport">
+        <!-- 游记经营进度（奶茶游记 = 战令；数据来自 milkTea.data.season，勿引用千星游记面板的 view.season） -->
+        <div class="act-card" v-if="milkTea.data.season && milkTea.data.season.passport">
           <div class="act-card-hd">
-            <h4>🗺️ {{ view.season.passport.title || '奶茶游记' }}</h4>
-            <span class="act-badge">等级 {{ n(view.season.passport.current_level) }}/{{ n(view.season.passport.max_level) }}</span>
+            <h4>🗺️ {{ milkTea.data.season.passport.title || '奶茶游记' }}</h4>
+            <span class="act-badge">等级 {{ n(milkTea.data.season.passport.current_level) }}/{{ n(milkTea.data.season.passport.max_level) }}</span>
           </div>
           <div class="act-stats">
-            <span>积分 <b>{{ n(view.season.passport.score) }}</b></span>
-            <span>可领 <b>{{ n(view.season.passport.claimable_levels) }} 档</b></span>
-            <span>进度 <b>{{ n(view.season.passport.current_progress) }}</b></span>
+            <span>积分 <b>{{ n(milkTea.data.season.passport.score) }}</b></span>
+            <span>可领 <b>{{ n(milkTea.data.season.passport.claimable_levels) }} 档</b></span>
+            <span>进度 <b>{{ n(milkTea.data.season.passport.current_progress) }}</b></span>
           </div>
-          <div class="bar-track"><div class="bar-fill" :style="{ width: (n(view.season.passport.max_level) > 0 ? Math.min(100, Math.round(n(view.season.passport.current_level) / n(view.season.passport.max_level) * 100)) : 0) + '%' }"></div></div>
-          <div class="act-hint">距下一级还需 {{ n(view.season.passport.next_level_need) }} 积分</div>
+          <div class="bar-track"><div class="bar-fill" :style="{ width: (n(milkTea.data.season.passport.max_level) > 0 ? Math.min(100, Math.round(n(milkTea.data.season.passport.current_level) / n(milkTea.data.season.passport.max_level) * 100)) : 0) + '%' }"></div></div>
+          <div class="act-hint">距下一级还需 {{ n(milkTea.data.season.passport.next_level_need) }} 积分</div>
+        </div>
+        <div class="act-card" v-else>
+          <div class="act-hint">奶茶游记数据加载失败或当前账号无战令数据，可点击下方「重试」。</div>
         </div>
 
         <!-- 操作 -->
         <div class="act-actions">
-          <button class="act-btn" :class="{ disabled: milkTea.busy || !(view.season && view.season.passport && n(view.season.passport.claimable_levels) > 0) }" :disabled="milkTea.busy || !(view.season && view.season.passport && n(view.season.passport.claimable_levels) > 0)" @click="claimMilkTea">领取经营收益 ({{ view.season && view.season.passport ? n(view.season.passport.claimable_levels) : 0 }} 档)</button>
+          <button class="act-btn" :class="{ disabled: milkTea.busy || !(milkTea.data.season && milkTea.data.season.passport && n(milkTea.data.season.passport.claimable_levels) > 0) }" :disabled="milkTea.busy || !(milkTea.data.season && milkTea.data.season.passport && n(milkTea.data.season.passport.claimable_levels) > 0)" @click="claimMilkTea">领取经营收益 ({{ milkTea.data.season && milkTea.data.season.passport ? n(milkTea.data.season.passport.claimable_levels) : 0 }} 档)</button>
+          <button class="act-btn" style="padding:4px 14px;font-size:13px" @click="loadMilkTea">重试</button>
         </div>
         <div class="act-card">
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer">

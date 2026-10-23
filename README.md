@@ -143,8 +143,23 @@ CGO_ENABLED=0 go build -o go-farm-bot .
 5. **添加农场账号**：进入「账号」页，用扫码、手动 code 或第三方登录绑定 QQ/微信农场号，再打开自动化开关
 
 > **安全提示**：首次登录后请尽快修改默认密码。
-> - 默认管理员账号：`admin` / `admin`（首次启动自动创建）
+> - 默认管理员账号：`admin` / `admin`（仅 users.json 中不存在 admin 用户时自动创建；改过密码后默认账号不再生效）
 > - 登录后进入「更多 → 后台」修改密码
+> - **忘记密码**：服务器上执行 `./go-farm-bot -reset-admin`（重置为 admin）或 `./go-farm-bot -reset-admin=新密码`，执行后即退出，再正常启动服务
+> - 多次输错密码会触发账号锁定/IP 限流，等待锁定时间过后再试
+
+### 一键启停脚本
+
+服务器上除了 systemd（`systemctl start/stop/restart/status go-farm-bot`），仓库根目录还提供 `farm.sh`（systemd 优先，裸进程兜底）：
+
+```bash
+chmod +x farm.sh
+./farm.sh start     # 启动（systemd 服务存在则走 systemctl，否则 nohup 裸进程 + pidfile）
+./farm.sh stop      # 停止
+./farm.sh restart   # 重启
+./farm.sh status    # 查看状态
+# 自定义二进制路径：FARM_BIN=/path/to/go-farm-bot ./farm.sh start
+```
 
 ### 多用户系统
 
