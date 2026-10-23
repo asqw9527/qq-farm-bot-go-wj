@@ -166,6 +166,7 @@ type ActivityNode struct {
 	HasDraw      bool            `json:"has_draw"`                // field105
 	MilkTeaShop  *MilkTeaShop    `json:"milk_tea_shop,omitempty"` // field121（S4 奶茶热销中店铺状态）
 	DrawInfo     []byte          `json:"-"`
+	RawBytes     []byte          `json:"-"` // 原始节点报文（诊断用，如 nodes_full 载荷摘要）
 }
 
 // MilkTeaShop S4 奶茶热销中：节点 field121 店铺实时状态。
@@ -315,7 +316,7 @@ func ParseActivityGroup(body []byte) *ActivityNode {
 }
 
 func parseActivityNode(raw []byte) *ActivityNode {
-	node := &ActivityNode{}
+	node := &ActivityNode{RawBytes: raw}
 	fs := readActFields(raw)
 	if infoRaw := actBytes(fs, 1); len(infoRaw) > 0 {
 		node.Info = parseActivityInfo(readActFields(infoRaw))

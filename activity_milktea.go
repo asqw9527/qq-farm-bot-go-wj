@@ -179,9 +179,10 @@ func handleMilkTeaShop(w http.ResponseWriter, r *http.Request) {
 					out["shop"] = shop
 				}
 			}
-			// 全节点清单：定位「制作奶茶」「领取员工收益」等操作节点（如员工收益 1659）
+			// 全节点清单（含各节点自身载荷字段树）：定位「制作奶茶」「领取员工收益」等操作协议
+			nst := &actTreeStats{Max: 900}
 			var nfs []*milkTeaNodeBrief
-			collectMilkTeaNodes(tree, 0, &nfs)
+			collectMilkTeaNodes(tree, 0, nst, &nfs)
 			out["nodes_full"] = nfs
 			// 原始字段树：累计营业额/销售额/营业速度/员工等字段映射的数据来源
 			st := &actTreeStats{Max: 4000}
@@ -229,24 +230,64 @@ func findMilkTeaShop(n *ActivityNode) *MilkTeaShop {
 	return nil
 }
 
-// milkTeaNodeBrief 全节点摘要（定位操作节点用）
+// milkTeaNodeBrief 全节点摘要（定位操作节点用）；Raw 为节点自身载荷字段树
+// （跳过 children field2 —— 子节点数据在各自条目里，避免重复）
 type milkTeaNodeBrief struct {
-	ID    int64  `json:"id"`
-	Title string `json:"title"`
-	Type  int64  `json:"type"`
-	Depth int    `json:"depth"`
+	ID    int64       `json:"id"`
+	Title string      `json:"title"`
+	Type  int64       `json:"type"`
+	Depth int         `json:"depth"`
+	Raw   interface{} `json:"raw,omitempty"`
 }
 
-func collectMilkTeaNodes(n *ActivityNode, depth int, out *[]*milkTeaNodeBrief) {
+func collectMilkTeaNodes(n *ActivityNode, depth int, st *actTreeStats, out *[]*milkTeaNodeBrief) {
 	if n == nil {
 		return
 	}
 	if n.Info != nil {
-		*out = append(*out, &milkTeaNodeBrief{ID: n.Info.ID, Title: n.Info.Title, Type: n.Info.Type, Depth: depth})
+		b := &milkTeaNodeBrief{ID: n.Info.ID, Title: n.Info.Title, Type: n.Info.Type, Depth: depth}
+		if len(n.RawBytes) > 0 && st.ok() {
+			b.Raw = nodePayloadBrief(n.RawBytes, st)
+		}
+		*out = append(*out, b)
 	}
 	for _, c := range n.Children {
-		collectMilkTeaNodes(c, depth+1, out)
+		collectMilkTeaNodes(c, depth+1, st, out)
 	}
+}
+
+// nodePayloadBrief 节点自身载荷字段树（wire2 递归展开、wire0 取值，跳过 field2/children）
+func nodePayloadBrief(raw []byte, st *actTreeStats) interface{} {
+	defer func() { _ = recover() }()
+	m := map[string]interface{}{}
+	for _, f := range readActFields(raw) {
+		if f.No == 2 {
+			continue
+		}
+		var val interface{}
+		switch f.Wire {
+		case 0:
+			val = f.Varint
+		case 2:
+			if st.ok() {
+				if sub := buildActTree(f.Bytes, 6, st); sub != nil {
+					st.Nodes++
+					val = sub
+				} else {
+					val = actTreeBytes(f.Bytes)
+				}
+			} else {
+				val = actTreeBytes(f.Bytes)
+			}
+		default:
+			continue
+		}
+		actTreeAppend(m, "f"+strconv.Itoa(f.No), val)
+	}
+	if len(m) == 0 {
+		return nil
+	}
+	return m
 }
 
 // ----- POST /api/activity/milktea/probe 协议探测（游戏内抓包用） -----

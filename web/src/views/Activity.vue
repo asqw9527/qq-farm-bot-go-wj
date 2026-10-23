@@ -1192,8 +1192,12 @@ onUnmounted(() => { window.removeEventListener('account-switched', onSwitched) }
           </div>
           <pre v-if="mtProbe.result" style="max-height:260px;overflow:auto;font-size:11px;white-space:pre-wrap;word-break:break-all;margin:8px 0 0;border:1px solid #eee;border-radius:6px;padding:8px;background:#fafafa">{{ mtProbe.result }}</pre>
           <details style="margin-top:8px">
-            <summary style="cursor:pointer;font-size:12px;color:#666">节点清单（nodes_full，含制作奶茶/员工收益等操作节点）</summary>
-            <pre style="max-height:240px;overflow:auto;font-size:11px;white-space:pre-wrap;margin:8px 0 0">{{ JSON.stringify(milkTea.data.nodes_full || [], null, 1) }}</pre>
+            <summary style="cursor:pointer;font-size:12px;color:#666">节点清单+载荷（nodes_full，含制作奶茶/员工收益等操作载荷字段）</summary>
+            <pre style="max-height:240px;overflow:auto;font-size:11px;white-space:pre-wrap;word-break:break-all;margin:8px 0 0">{{ JSON.stringify(milkTea.data.nodes_full || []) }}</pre>
+          </details>
+          <details style="margin-top:6px">
+            <summary style="cursor:pointer;font-size:12px;color:#666">f121 店铺状态原始树（shop.raw，对照游戏内数值映射今日售出/营业速度/员工字段）</summary>
+            <pre style="max-height:240px;overflow:auto;font-size:11px;white-space:pre-wrap;word-break:break-all;margin:8px 0 0">{{ milkTea.data.shop && milkTea.data.shop.raw ? JSON.stringify(milkTea.data.shop.raw) : '（无 shop 数据）' }}</pre>
           </details>
           <pre v-if="milkTea.showTree && milkTea.data.tree" style="max-height:300px;overflow:auto;font-size:11px;white-space:pre-wrap;word-break:break-all;margin:8px 0 0">{{ JSON.stringify(milkTea.data.tree, null, 1) }}</pre>
         </div>
