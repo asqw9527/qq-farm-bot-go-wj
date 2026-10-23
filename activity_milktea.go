@@ -246,7 +246,7 @@ func handleMilkTeaClaim(w http.ResponseWriter, r *http.Request) {
 		writeJSONMap(w, "ok", false, "error", "缺少 accountId")
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second) // 多形态尝试 + 前后两次 GetSeasonInfo，给足超时
 	defer cancel()
 	rewards, claimed, err := milkTeaClaimOnce(ctx, accountID)
 	if err != nil {
@@ -262,6 +262,12 @@ func handleMilkTeaClaim(w http.ResponseWriter, r *http.Request) {
 }
 
 // milkTeaClaimOnce 领一次奶茶游记全部可领档位。返回 (奖励明细, 领取档位数, 错误)
+//
+// 协议排查记录（2026-10-23 实测）：ClaimBattlePassRewards 空请求被服务端拒绝，
+// 报错原文「游记不存在」——GetSeasonInfo 能查到游记（等级/可领档位正常），
+// 说明领取请求需要携带游记/活动标识。真实请求形态待抓包实锤前，这里依次尝试
+// 多种常见形态：哪种成功用哪种；全部失败时把各形态的服务端原文拼进错误带回
+// 前端常驻显示（面板 claimError 区），作为下一轮映射的依据。
 func milkTeaClaimOnce(ctx context.Context, accountID string) ([]*Item, int64, error) {
 	beforeBody, err := rpcRequest(ctx, accountID, seasonSvc, "GetSeasonInfo", []byte{}, 15*time.Second)
 	if err != nil {
@@ -271,21 +277,45 @@ func milkTeaClaimOnce(ctx context.Context, accountID string) ([]*Item, int64, er
 	if before == nil || before.Passport == nil || before.Passport.ClaimableLevels <= 0 {
 		return nil, 0, fmt.Errorf("暂无可领取的游记奖励")
 	}
-	claimBody, err := rpcRequest(ctx, accountID, seasonSvc, "ClaimBattlePassRewards", []byte{}, 15*time.Second)
-	if err != nil {
-		return nil, 0, err
+
+	type claimVariant struct {
+		Name string
+		Body []byte
 	}
-	res := ParseSeasonClaim(claimBody)
-	claimed := before.Passport.ClaimableLevels
-	// 以领取后实际差额为准（防并发少领）
-	if afterBody, err := rpcRequest(ctx, accountID, seasonSvc, "GetSeasonInfo", []byte{}, 15*time.Second); err == nil {
-		if after := ParseSeason(afterBody); after != nil && after.Passport != nil && before.Passport != nil {
-			if d := after.Passport.FreeClaimedLevel - before.Passport.FreeClaimedLevel; d > 0 {
-				claimed = d
+	variants := []claimVariant{{Name: "空请求"}}
+	if id := before.Passport.ActivityID; id > 0 {
+		b := proto.NewBuilder()
+		b.FieldInt64(1, id)
+		variants = append(variants, claimVariant{Name: fmt.Sprintf("f1=season.activity_id(%d)", id), Body: b.Bytes()})
+	}
+	for _, id := range []int64{2026110100, 2026110101} {
+		b := proto.NewBuilder()
+		b.FieldInt64(1, id)
+		variants = append(variants, claimVariant{Name: fmt.Sprintf("f1=%d", id), Body: b.Bytes()})
+	}
+
+	var errs []string
+	for _, v := range variants {
+		claimBody, err := rpcRequest(ctx, accountID, seasonSvc, "ClaimBattlePassRewards", v.Body, 15*time.Second)
+		if err == nil {
+			res := ParseSeasonClaim(claimBody)
+			claimed := before.Passport.ClaimableLevels
+			// 以领取后实际差额为准（防并发少领）
+			if afterBody, err := rpcRequest(ctx, accountID, seasonSvc, "GetSeasonInfo", []byte{}, 15*time.Second); err == nil {
+				if after := ParseSeason(afterBody); after != nil && after.Passport != nil && before.Passport != nil {
+					if d := after.Passport.FreeClaimedLevel - before.Passport.FreeClaimedLevel; d > 0 {
+						claimed = d
+					}
+				}
 			}
+			log.Printf("[milktea] 游记领取成功（请求形态 %s，账号 %s）: %d 档", v.Name, accountID, claimed)
+			appendOpLog(accountID, "活动", fmt.Sprintf("奶茶游记领取成功（%s）: %d 档", v.Name, claimed))
+			return res.Rewards, claimed, nil
 		}
+		errs = append(errs, v.Name+" → "+actErrMsg(err))
 	}
-	return res.Rewards, claimed, nil
+	return nil, 0, fmt.Errorf("passport.activity_id=%d 可领 %d 档；%d 种请求形态均被拒绝：%s",
+		before.Passport.ActivityID, before.Passport.ClaimableLevels, len(variants), strings.Join(errs, " ｜ "))
 }
 
 // ----- 自动收取经营收益（奶茶游记档位）后台循环 -----
