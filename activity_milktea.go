@@ -348,8 +348,14 @@ func handleMilkTeaProbe(w http.ResponseWriter, r *http.Request) {
 		ExtHex    string  `json:"ext_hex"`
 		Sweep     bool    `json:"sweep"`
 		Cmds      []int64 `json:"cmds"`
+		// 多组扫描：每组独立的 ext 字段号/hex 与 cmd 列表，一次请求全部跑完并合并返回
+		Sweeps []struct {
+			ExtField int     `json:"ext_field"`
+			ExtHex   string  `json:"ext_hex"`
+			Cmds     []int64 `json:"cmds"`
+		} `json:"sweeps"`
 	}
-	body, err := io.ReadAll(io.LimitReader(r.Body, 8192))
+	body, err := io.ReadAll(io.LimitReader(r.Body, 16384))
 	if err == nil && len(body) > 0 {
 		_ = json.Unmarshal(body, &req)
 	}
@@ -361,32 +367,63 @@ func handleMilkTeaProbe(w http.ResponseWriter, r *http.Request) {
 
 	// 扫描模式：对同一节点依次发多个 cmd，收集每个的服务端响应/报错原文
 	if req.Sweep && len(req.Cmds) > 0 {
-		if len(req.Cmds) > 32 {
-			req.Cmds = req.Cmds[:32]
+		if len(req.Cmds) > 64 {
+			req.Cmds = req.Cmds[:64]
 		}
-		ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
+		req.Sweeps = append(req.Sweeps, struct {
+			ExtField int     `json:"ext_field"`
+			ExtHex   string  `json:"ext_hex"`
+			Cmds     []int64 `json:"cmds"`
+		}{ExtField: req.ExtField, ExtHex: req.ExtHex, Cmds: req.Cmds})
+	}
+	if req.Sweep && len(req.Sweeps) > 0 {
+		total := 0
+		for _, s := range req.Sweeps {
+			total += len(s.Cmds)
+		}
+		if total > 128 {
+			writeJSONMap(w, "ok", false, "error", "单次扫描总 cmd 数超过 128")
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 300*time.Second)
 		defer cancel()
 		type sweepItem struct {
-			Cmd   int64       `json:"cmd"`
-			OK    bool        `json:"ok"`
-			Error string      `json:"error,omitempty"`
-			Reply interface{} `json:"reply,omitempty"`
+			Cmd      int64       `json:"cmd"`
+			ExtField int         `json:"ext_field,omitempty"`
+			ExtHex   string      `json:"ext_hex,omitempty"`
+			OK       bool        `json:"ok"`
+			Error    string      `json:"error,omitempty"`
+			Reply    interface{} `json:"reply,omitempty"`
 		}
-		results := make([]*sweepItem, 0, len(req.Cmds))
-		for _, cmd := range req.Cmds {
-			b := proto.NewBuilder()
-			b.FieldInt64(1, req.ID)
-			b.FieldInt64(2, cmd)
-			item := &sweepItem{Cmd: cmd}
-			rep, err := rpcRequest(ctx, accountID, actSvc, "Operate", b.Bytes(), 12*time.Second)
-			if err != nil {
-				item.Error = actErrMsg(err)
-			} else {
-				item.OK = true
-				st := &actTreeStats{Max: 300}
-				item.Reply = buildActTree(rep, 8, st)
+		results := make([]*sweepItem, 0, total)
+		for _, s := range req.Sweeps {
+			if len(s.Cmds) > 64 {
+				s.Cmds = s.Cmds[:64]
 			}
-			results = append(results, item)
+			var extRaw []byte
+			if s.ExtField > 0 && s.ExtHex != "" {
+				if raw, hexErr := hex.DecodeString(strings.TrimSpace(s.ExtHex)); hexErr == nil {
+					extRaw = raw
+				}
+			}
+			for _, cmd := range s.Cmds {
+				b := proto.NewBuilder()
+				b.FieldInt64(1, req.ID)
+				b.FieldInt64(2, cmd)
+				if s.ExtField > 0 {
+					b.FieldBytes(s.ExtField, extRaw) // ext_hex 为空时附加空扩展字段（参考点亮 119 先例）
+				}
+				item := &sweepItem{Cmd: cmd, ExtField: s.ExtField, ExtHex: s.ExtHex}
+				rep, err := rpcRequest(ctx, accountID, actSvc, "Operate", b.Bytes(), 12*time.Second)
+				if err != nil {
+					item.Error = actErrMsg(err)
+				} else {
+					item.OK = true
+					st := &actTreeStats{Max: 300}
+					item.Reply = buildActTree(rep, 8, st)
+				}
+				results = append(results, item)
+			}
 		}
 		writeJSON(w, map[string]interface{}{"ok": true, "account": accountID, "id": req.ID, "sweep": results})
 		return

@@ -1012,42 +1012,80 @@ async function mtProbeSend() {
   }
 }
 
-// 扫描节点 cmd：cmd 框支持「31-60」范围语法（留空=1-30），分批(≤32)发 Operate，结果下载为 milktea-sweep.json
+// 解析数字/范围/逗号列表，如 "7" / "31-60" / "1,7,101,107"
+function parseNumList(v, defLo, defHi) {
+  const s = String(v || '').trim()
+  if (!s) { const out = []; for (let i = defLo; i <= defHi; i++) out.push(i); return out }
+  const out = []
+  for (const part of s.split(/[,，\s]+/)) {
+    if (!part) continue
+    const m = part.match(/^(\d+)\s*[-~]\s*(\d+)$/)
+    if (m) { const a = Number(m[1]), b = Number(m[2]); for (let i = Math.min(a, b); i <= Math.max(a, b); i++) out.push(i) }
+    else if (/^\d+$/.test(part)) out.push(Number(part))
+  }
+  return Array.from(new Set(out))
+}
+
+// 扫描节点 cmd × ext 字段号：cmd 支持范围/列表（留空=1-30），ext 字段号支持逗号列表（留空=无 ext）
+// 服务端单次总 cmd 上限 128，此处按 128 一批拆分；结果成功项排前，并自动下载 milktea-sweep.json
 async function mtSweepCmds() {
   const a = acc(); if (!a) return
   if (!Number(mtProbe.id)) { app.error('请先填节点 id'); return }
-  let lo = 1, hi = 30
-  const m = String(mtProbe.cmd || '').trim().match(/^(\d+)\s*[-~]\s*(\d+)$/)
-  if (m) { lo = Number(m[1]); hi = Number(m[2]) }
-  else if (String(mtProbe.cmd || '').trim()) { lo = hi = Number(mtProbe.cmd) }
-  if (hi - lo + 1 > 128) { app.error('范围过大（最多128个）'); return }
-  const cmds = []
-  for (let c = lo; c <= hi; c++) cmds.push(c)
+  const cmds = parseNumList(mtProbe.cmd, 1, 30)
+  const extHex = (mtProbe.ext_hex || '').trim()
+  let extFields = parseNumList(mtProbe.ext_field, 0, -1)
+  if (extFields.length === 0) extFields = [0] // 无 ext 也要发一轮（参考点亮 119：空扩展字段也能命中）
+  if (!cmds.length) { app.error('cmd 为空'); return }
+  const total = cmds.length * extFields.length
+  if (total > 512) { app.error(`组合数 ${total} 过大（最多512）`); return }
+
+  // 构造 (extField, cmd) 组合，按 128 一批
+  const combos = []
+  for (const ef of extFields) for (const c of cmds) combos.push({ ef, c })
+
   mtProbe.busy = true
   try {
     const sweep = []
     let last = null
-    for (let i = 0; i < cmds.length; i += 32) {
+    for (let i = 0; i < combos.length; i += 128) {
+      const batch = combos.slice(i, i + 128)
+      const byExt = {}
+      for (const { ef, c } of batch) (byExt[ef] = byExt[ef] || []).push(c)
+      const sweeps = Object.keys(byExt).map((k) => ({
+        ext_field: Number(k) || 0,
+        ext_hex: extHex,
+        cmds: byExt[k],
+      }))
       const { data } = await api.post('/api/activity/milktea/probe', {
-        accountId: a, sweep: true, id: Number(mtProbe.id) || 0, cmds: cmds.slice(i, i + 32),
+        accountId: a, sweep: true, id: Number(mtProbe.id) || 0, sweeps,
       })
       if (data && Array.isArray(data.sweep)) sweep.push(...data.sweep)
       last = data
     }
-    mtProbe.result = JSON.stringify({ ...last, sweep }, null, 1)
-    const blob = new Blob([JSON.stringify(data, null, 1)], { type: 'application/json' })
+    // 成功项排前，便于快速定位有效 cmd/ext
+    sweep.sort((x, y) => (y.ok ? 1 : 0) - (x.ok ? 1 : 0))
+    const okCount = sweep.filter((s) => s.ok).length
+    const payload = { ...(last || {}), id: Number(mtProbe.id) || 0, ok_count: okCount, total: sweep.length, sweep }
+    mtProbe.result = JSON.stringify(payload, null, 1)
+    const blob = new Blob([JSON.stringify(payload, null, 1)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const el = document.createElement('a')
     el.href = url
-    el.download = 'milktea-sweep.json'
+    el.download = `milktea-sweep-${Number(mtProbe.id) || 0}.json`
     el.click()
     URL.revokeObjectURL(url)
-    app.success('扫描完成，结果已下载')
+    app.success(`扫描完成：${sweep.length} 组，成功 ${okCount} 组，结果已下载`)
   } catch (e) {
-    app.error('扫描失败')
+    app.error('扫描失败：' + String((e && e.response && e.response.data && e.response.data.error) || e))
   } finally {
     mtProbe.busy = false
   }
+}
+
+function copyMilkTeaProbe() {
+  if (!mtProbe.result) { app.error('暂无结果'); return }
+  navigator.clipboard.writeText(mtProbe.result).then(() => app.success('结果已复制到剪贴板'))
+    .catch(() => app.error('复制失败，请手动选中复制'))
 }
 
 // 下载奶茶面板完整诊断 JSON（节点载荷/f121 原始树/字段树），便于离线对照映射
@@ -1246,8 +1284,10 @@ onUnmounted(() => { window.removeEventListener('account-switched', onSwitched) }
             <input v-model="mtProbe.ext_field" placeholder="ext字段号(选填)" style="width:120px;padding:4px 8px;font-size:12px;border:1px solid #d9d9d9;border-radius:6px">
             <input v-model="mtProbe.ext_hex" placeholder="ext hex(选填，如 0801)" style="width:150px;padding:4px 8px;font-size:12px;border:1px solid #d9d9d9;border-radius:6px">
             <button class="act-btn" :class="{ disabled: mtProbe.busy }" :disabled="mtProbe.busy" style="padding:4px 14px;font-size:12px" @click="mtProbeSend">{{ mtProbe.busy ? '发送中…' : '发送 Operate' }}</button>
-            <button class="act-btn" :class="{ disabled: mtProbe.busy }" :disabled="mtProbe.busy" style="padding:4px 14px;font-size:12px" @click="mtSweepCmds">扫描cmd(可填31-60)</button>
+            <button class="act-btn" :class="{ disabled: mtProbe.busy }" :disabled="mtProbe.busy" style="padding:4px 14px;font-size:12px" @click="mtSweepCmds">{{ mtProbe.busy ? '扫描中…' : '扫描(cmd×ext)' }}</button>
+            <button class="act-btn" style="padding:4px 12px;font-size:12px" @click="copyMilkTeaProbe">复制结果</button>
           </div>
+          <div class="act-hint" style="margin-top:4px">扫描语法：cmd <code>31-60</code> / <code>1,7,12</code>（留空=1-30）；ext字段号 <code>101,107,119,140</code>（留空=不带ext也发一轮）。总组合≤512，结果成功项自动排前。</div>
           <pre v-if="mtProbe.result" style="max-height:260px;overflow:auto;font-size:11px;white-space:pre-wrap;word-break:break-all;margin:8px 0 0;border:1px solid #eee;border-radius:6px;padding:8px;background:#fafafa">{{ mtProbe.result }}</pre>
           <details style="margin-top:8px">
             <summary style="cursor:pointer;font-size:12px;color:#666">节点清单+载荷（nodes_full，含制作奶茶/员工收益等操作载荷字段）</summary>
