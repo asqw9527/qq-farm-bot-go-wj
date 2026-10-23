@@ -28,9 +28,9 @@ const petState = reactive({ data: null, err: '' })
 const petBusy = ref(false)
 const qmState = reactive({ activity: {}, reward: {}, material: {}, err: '' })
 
-/* ---------- 奶茶店铺（S4 奶茶热销中） ---------- */
+/* ---------- 奶茶店铺（S4 奶茶热销中；游记活动已下线，仅保留店铺面板） ---------- */
 const MILK_TEA_PREFIX = 20261101
-const milkTea = reactive({ data: null, err: '', auto: false, showTree: false, busy: false, claimError: '' })
+const milkTea = reactive({ data: null, err: '', showTree: false })
 
 /* ---------- 鹊桥寄情（QiXi） ---------- */
 const QIXI_ROOT_ID = 2026081800
@@ -968,47 +968,10 @@ async function loadMilkTea() {
     const { data } = await api.get('/api/activity/milktea/shop', { params: { accountId: a } })
     if (data && data.ok) {
       milkTea.data = data
-      milkTea.auto = !!data.auto_claim
     } else {
       milkTea.err = (data && data.error) || '加载失败'
     }
   } catch (e) { milkTea.err = '加载失败' }
-}
-
-async function claimMilkTea() {
-  const a = acc(); if (!a) return
-  milkTea.busy = true
-  milkTea.claimError = ''
-  try {
-    const { data } = await api.post('/api/activity/milktea/claim', null, { params: { accountId: a } })
-    if (!(data && data.ok)) {
-      // 报错原文常驻面板显示（toast 2~3 秒即逝，来不及看清；协议排查需要完整原文）
-      milkTea.claimError = (data && data.error) || '领取失败'
-      app.error(milkTea.claimError)
-      return
-    }
-    app.success(`已领取 ${data.claimed || 0} 档游记奖励`)
-    await loadMilkTea()
-  } catch (e) {
-    milkTea.claimError = (e && e.response && e.response.data && e.response.data.error) || '领取失败（网络或服务异常）'
-    app.error(milkTea.claimError)
-  } finally {
-    milkTea.busy = false
-  }
-}
-
-async function toggleMilkTeaAuto() {
-  try {
-    const s = (await api.get('/api/settings')).data
-    const aut = (s && s.data && s.data.automation) || {}
-    aut.milk_tea_auto_claim = !!milkTea.auto
-    const { data } = await api.post('/api/automation', aut)
-    if (!(data && data.ok)) throw new Error()
-    app.success(milkTea.auto ? '已开启自动收取（每 30 分钟一轮）' : '已关闭自动收取')
-  } catch (e) {
-    milkTea.auto = !milkTea.auto
-    app.error('保存失败')
-  }
 }
 
 function fmtRevenue(v) {
@@ -1168,38 +1131,9 @@ onUnmounted(() => { window.removeEventListener('account-switched', onSwitched) }
           </div>
         </div>
 
-        <!-- 游记经营进度（奶茶游记 = 战令；数据来自 milkTea.data.season，勿引用千星游记面板的 view.season） -->
-        <div class="act-card" v-if="milkTea.data.season && milkTea.data.season.passport">
-          <div class="act-card-hd">
-            <h4>🗺️ {{ milkTea.data.season.passport.title || '奶茶游记' }}</h4>
-            <span class="act-badge">等级 {{ n(milkTea.data.season.passport.current_level) }}/{{ n(milkTea.data.season.passport.max_level) }}</span>
-          </div>
-          <div class="act-stats">
-            <span>积分 <b>{{ n(milkTea.data.season.passport.score) }}</b></span>
-            <span>可领 <b>{{ n(milkTea.data.season.passport.claimable_levels) }} 档</b></span>
-            <span>进度 <b>{{ n(milkTea.data.season.passport.current_progress) }}</b></span>
-          </div>
-          <div class="bar-track"><div class="bar-fill" :style="{ width: (n(milkTea.data.season.passport.max_level) > 0 ? Math.min(100, Math.round(n(milkTea.data.season.passport.current_level) / n(milkTea.data.season.passport.max_level) * 100)) : 0) + '%' }"></div></div>
-          <div class="act-hint">距下一级还需 {{ n(milkTea.data.season.passport.next_level_need) }} 积分</div>
-        </div>
-        <div class="act-card" v-else>
-          <div class="act-hint">奶茶游记数据加载失败或当前账号无战令数据，可点击下方「重试」。</div>
-        </div>
-
         <!-- 操作 -->
         <div class="act-actions">
-          <button class="act-btn" :class="{ disabled: milkTea.busy || !(milkTea.data.season && milkTea.data.season.passport && n(milkTea.data.season.passport.claimable_levels) > 0) }" :disabled="milkTea.busy || !(milkTea.data.season && milkTea.data.season.passport && n(milkTea.data.season.passport.claimable_levels) > 0)" @click="claimMilkTea">领取经营收益 ({{ milkTea.data.season && milkTea.data.season.passport ? n(milkTea.data.season.passport.claimable_levels) : 0 }} 档)</button>
-          <button class="act-btn" style="padding:4px 14px;font-size:13px" @click="loadMilkTea">重试</button>
-        </div>
-        <!-- 领取报错原文常驻显示（协议排查用，toast 存活太短看不清） -->
-        <div class="act-card" v-if="milkTea.claimError" style="border-color:#e5484d">
-          <div class="act-hint" style="color:#e5484d;font-weight:600">⚠️ 领取报错原文：{{ milkTea.claimError }}</div>
-        </div>
-        <div class="act-card">
-          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-            <input type="checkbox" v-model="milkTea.auto" @change="toggleMilkTeaAuto">
-            <span>自动收取经营收益（每 30 分钟一轮，后台自动领取可领档位）</span>
-          </label>
+          <button class="act-btn" style="padding:4px 14px;font-size:13px" @click="loadMilkTea">刷新数据</button>
         </div>
 
         <!-- 兑换商店 -->

@@ -4,29 +4,24 @@ package main
 //
 // 已确认协议（抓包/代码实锤）：
 //   - 活动列表   ActivityService.List          → 活动节点（奶茶组 20261101xx）
-//   - 活动分组树 ActivityService.GetGroup      → 节点树 + 兑换商店(field102)
-//   - 游记战令   SeasonService.GetSeasonInfo   → 等级/积分/进度/可领档位（奶茶游记）
-//   - 领取档位   SeasonService.ClaimBattlePassRewards（空请求）
+//   - 活动分组树 ActivityService.GetGroup      → 节点树 + 兑换商店(field102) + 店铺状态(field121)
+//
+// 注：奶茶游记（战令 SeasonService）活动已下线，相关领取逻辑已删除；
+//     千星游记等仍在使用 SeasonService 的功能见 activity_api.go / task_auto.go。
 //
 // 待抓包映射（游戏内奶茶店铺界面独有数据，字段号未知）：
-//   店铺名称/店铺等级/累计营业额/销售额/营业速度/员工（名称、特长、工作时长、互动收益）
+//   累计营业额/销售额/营业速度/员工（名称、特长、工作时长、互动收益）
 //   → 通过 /api/activity/milktea/shop 返回的 tree（原始字段树）做人工对照后补映射。
-//
-// 自动收取经营收益：现阶段收取已实锤的「奶茶游记档位奖励」，每 30 分钟一轮；
-// 店铺营业额收取接口待协议映射后在 milkTeaClaimShopIncome 中补充。
 
 import (
 	"context"
 	"encoding/base64"
-	"fmt"
-	"log"
 	"net/http"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/asqw9527/qq-farm-bot-go-wj/models"
 	"github.com/asqw9527/qq-farm-bot-go-wj/proto"
 )
 
@@ -157,20 +152,13 @@ func handleMilkTeaShop(w http.ResponseWriter, r *http.Request) {
 	// 1. 定位奶茶活动
 	nodes := milkTeaFindNodes(ctx, accountID)
 
-	// 2. 拉游记战令（奶茶游记：等级/积分/进度/可领档位）
-	var season *SeasonInfo
-	if sb, err := rpcRequest(ctx, accountID, seasonSvc, "GetSeasonInfo", []byte{}, 15*time.Second); err == nil {
-		season = ParseSeason(sb)
-	}
-
 	out := map[string]interface{}{
 		"ok":      true,
 		"account": accountID,
 		"now":     time.Now().Unix(),
-		"season":  season,
 	}
 
-	// 3. 首个在期活动节点：分组树 + 兑换商店 + 店铺实时状态 + 原始字段树（协议映射诊断）
+	// 2. 首个在期活动节点：分组树 + 兑换商店 + 店铺实时状态 + 原始字段树（协议映射诊断）
 	if len(nodes) > 0 {
 		node := nodes[0]
 		gb, err := rpcRequest(ctx, accountID, actSvc, "GetGroup", actGroupReqBody(node.ID), 20*time.Second)
@@ -207,10 +195,6 @@ func handleMilkTeaShop(w http.ResponseWriter, r *http.Request) {
 	}
 	out["nodes"] = briefs
 
-	// 4. 自动收取开关状态
-	cfg := models.GetAutomation(accountID)
-	out["auto_claim"] = cfg.MilkTeaAutoClaim
-
 	writeJSON(w, out)
 }
 
@@ -236,142 +220,4 @@ func findMilkTeaShop(n *ActivityNode) *MilkTeaShop {
 		}
 	}
 	return nil
-}
-
-// ----- POST /api/activity/milktea/claim 手动领取游记档位 -----
-
-func handleMilkTeaClaim(w http.ResponseWriter, r *http.Request) {
-	accountID := resolveAccountIDWithOwner(r, r.URL.Query().Get("accountId"))
-	if accountID == "" {
-		writeJSONMap(w, "ok", false, "error", "缺少 accountId")
-		return
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second) // 多形态尝试 + 前后两次 GetSeasonInfo，给足超时
-	defer cancel()
-	rewards, claimed, err := milkTeaClaimOnce(ctx, accountID)
-	if err != nil {
-		writeJSONMap(w, "ok", false, "error", actErrMsg(err))
-		return
-	}
-	writeJSON(w, map[string]interface{}{
-		"ok":      true,
-		"account": accountID,
-		"rewards": rewards,
-		"claimed": claimed,
-	})
-}
-
-// milkTeaClaimOnce 领一次奶茶游记全部可领档位。返回 (奖励明细, 领取档位数, 错误)
-//
-// 协议排查记录（2026-10-23 实测）：ClaimBattlePassRewards 空请求被服务端拒绝，
-// 报错原文「游记不存在」——GetSeasonInfo 能查到游记（等级/可领档位正常），
-// 说明领取请求需要携带游记/活动标识。真实请求形态待抓包实锤前，这里依次尝试
-// 多种常见形态：哪种成功用哪种；全部失败时把各形态的服务端原文拼进错误带回
-// 前端常驻显示（面板 claimError 区），作为下一轮映射的依据。
-func milkTeaClaimOnce(ctx context.Context, accountID string) ([]*Item, int64, error) {
-	beforeBody, err := rpcRequest(ctx, accountID, seasonSvc, "GetSeasonInfo", []byte{}, 15*time.Second)
-	if err != nil {
-		return nil, 0, err
-	}
-	before := ParseSeason(beforeBody)
-	if before == nil || before.Passport == nil || before.Passport.ClaimableLevels <= 0 {
-		return nil, 0, fmt.Errorf("暂无可领取的游记奖励")
-	}
-
-	type claimVariant struct {
-		Name string
-		Body []byte
-	}
-	variants := []claimVariant{{Name: "空请求"}}
-	if id := before.Passport.ActivityID; id > 0 {
-		b := proto.NewBuilder()
-		b.FieldInt64(1, id)
-		variants = append(variants, claimVariant{Name: fmt.Sprintf("f1=season.activity_id(%d)", id), Body: b.Bytes()})
-	}
-	for _, id := range []int64{2026110100, 2026110101} {
-		b := proto.NewBuilder()
-		b.FieldInt64(1, id)
-		variants = append(variants, claimVariant{Name: fmt.Sprintf("f1=%d", id), Body: b.Bytes()})
-	}
-
-	var errs []string
-	for _, v := range variants {
-		claimBody, err := rpcRequest(ctx, accountID, seasonSvc, "ClaimBattlePassRewards", v.Body, 15*time.Second)
-		if err == nil {
-			res := ParseSeasonClaim(claimBody)
-			claimed := before.Passport.ClaimableLevels
-			// 以领取后实际差额为准（防并发少领）
-			if afterBody, err := rpcRequest(ctx, accountID, seasonSvc, "GetSeasonInfo", []byte{}, 15*time.Second); err == nil {
-				if after := ParseSeason(afterBody); after != nil && after.Passport != nil && before.Passport != nil {
-					if d := after.Passport.FreeClaimedLevel - before.Passport.FreeClaimedLevel; d > 0 {
-						claimed = d
-					}
-				}
-			}
-			log.Printf("[milktea] 游记领取成功（请求形态 %s，账号 %s）: %d 档", v.Name, accountID, claimed)
-			appendOpLog(accountID, "活动", fmt.Sprintf("奶茶游记领取成功（%s）: %d 档", v.Name, claimed))
-			return res.Rewards, claimed, nil
-		}
-		errs = append(errs, v.Name+" → "+actErrMsg(err))
-	}
-	return nil, 0, fmt.Errorf("passport.activity_id=%d 可领 %d 档；%d 种请求形态均被拒绝：%s",
-		before.Passport.ActivityID, before.Passport.ClaimableLevels, len(variants), strings.Join(errs, " ｜ "))
-}
-
-// ----- 自动收取经营收益（奶茶游记档位）后台循环 -----
-
-const (
-	milkTeaClaimInterval  = 30 * time.Minute
-	milkTeaClaimStartWait = 90 * time.Second // 等网关连接建立
-)
-
-// startMilkTeaAutoClaimLoop 启动后台循环：启动延迟后执行一轮，之后每 30 分钟一轮。
-func startMilkTeaAutoClaimLoop(ctx context.Context) {
-	go func() {
-		select {
-		case <-time.After(milkTeaClaimStartWait):
-		case <-ctx.Done():
-			return
-		}
-		runMilkTeaAutoClaimRound(ctx)
-		t := time.NewTicker(milkTeaClaimInterval)
-		defer t.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-t.C:
-				runMilkTeaAutoClaimRound(ctx)
-			}
-		}
-	}()
-	log.Printf("[milktea] 奶茶经营收益自动收取循环已启动，间隔 30 分钟")
-}
-
-// runMilkTeaAutoClaimRound 单轮：遍历开启自动收取的在线账号。
-func runMilkTeaAutoClaimRound(ctx context.Context) {
-	for _, acc := range models.GetAccounts() {
-		if !models.GetAutomation(acc.ID).MilkTeaAutoClaim {
-			continue
-		}
-		c := clientPool.cached(acc.ID)
-		if c == nil || c.IsClosed() {
-			continue
-		}
-		actCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
-		rewards, claimed, err := milkTeaClaimOnce(actCtx, acc.ID)
-		cancel()
-		if err != nil {
-			if !strings.Contains(err.Error(), "暂无可领取") {
-				log.Printf("[milktea] 自动收取失败(账号 %s): %v", acc.ID, err)
-			}
-			continue
-		}
-		names := make([]string, 0, len(rewards))
-		for _, it := range rewards {
-			names = append(names, fmt.Sprintf("%s×%d", it.Name, it.Count))
-		}
-		log.Printf("[milktea] 自动收取成功(账号 %s): %d 档 %s", acc.ID, claimed, strings.Join(names, ", "))
-		appendOpLog(acc.ID, "活动", fmt.Sprintf("奶茶游记自动收取: %d 档", claimed))
-	}
 }

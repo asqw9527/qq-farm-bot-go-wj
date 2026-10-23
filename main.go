@@ -126,9 +126,6 @@ func main() {
 	// 启动神秘商人自动购买
 	startMysteryAutoBuyLoop(context.Background())
 
-	// 启动奶茶经营收益自动收取（S4 奶茶热销中）
-	startMilkTeaAutoClaimLoop(context.Background())
-
 	// 启动定时收益推送调度（每天北京时间指定时刻推一次）
 	startDailyReportScheduler()
 
