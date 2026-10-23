@@ -1012,6 +1012,24 @@ async function mtProbeSend() {
   }
 }
 
+// 下载奶茶面板完整诊断 JSON（节点载荷/f121 原始树/字段树），便于离线对照映射
+async function downloadMilkTeaDiag() {
+  const a = acc(); if (!a) return
+  try {
+    const { data } = await api.get('/api/activity/milktea/shop', { params: { accountId: a } })
+    const blob = new Blob([JSON.stringify(data, null, 1)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const el = document.createElement('a')
+    el.href = url
+    el.download = 'milktea-diag.json'
+    el.click()
+    URL.revokeObjectURL(url)
+    app.success('诊断 JSON 已下载')
+  } catch (e) {
+    app.error('下载失败')
+  }
+}
+
 function copyMilkTeaTree() {
   const t = milkTea.data && milkTea.data.tree
   if (!t) return
@@ -1177,6 +1195,7 @@ onUnmounted(() => { window.removeEventListener('account-switched', onSwitched) }
           <div class="act-card-hd">
             <h4>🔧 协议诊断</h4>
             <span style="display:flex;gap:8px">
+              <button class="act-btn" style="padding:2px 10px;font-size:12px" @click="downloadMilkTeaDiag">下载诊断JSON</button>
               <button v-if="milkTea.data.tree" class="act-btn" style="padding:2px 10px;font-size:12px" @click="copyMilkTeaTree">复制字段树</button>
               <button class="act-btn" style="padding:2px 10px;font-size:12px" @click="milkTea.showTree = !milkTea.showTree">{{ milkTea.showTree ? '收起' : '展开' }}</button>
             </span>
