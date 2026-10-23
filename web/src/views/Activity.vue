@@ -739,7 +739,9 @@ async function loadGroup(group) {
       pl.push({ key: 'pet', title: (theme && theme.pet) || '萌宠玩法', icon: '🐻' })
       pl.push({ key: 'stories', title: (theme && theme.stories) || '成长手记', icon: '🐾' })
     }
-    if (season && season.passport) pl.push({ key: 'season', title: season.passport.title || (theme && theme.name) || '游记战令', icon: '🗺️' })
+    // 奶茶游记活动已下线：服务端 GetSeasonInfo 仍返回残壳数据（可领档位假数据，领取报「游记不存在」），
+    // 按战令标题屏蔽；千星游记等其他战令不受影响
+    if (season && season.passport && !String(season.passport.title || '').includes('奶茶')) pl.push({ key: 'season', title: season.passport.title || (theme && theme.name) || '游记战令', icon: '🗺️' })
     if (Math.floor(group.id / 100) === MILK_TEA_PREFIX) pl.push({ key: 'milktea', title: '奶茶店铺', icon: '🧋' })
     if (giftNode) pl.push({ key: 'gift', title: (theme && theme.gift) || '每日赠礼', icon: '🌟' })
     if (shopNode) pl.push({ key: 'shop', title: (theme && theme.shop) || '兑换商店', icon: '🛍️' })
