@@ -16,6 +16,9 @@ package main
 import (
 	"context"
 	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
+	"io"
 	"net/http"
 	"sort"
 	"strconv"
@@ -176,10 +179,14 @@ func handleMilkTeaShop(w http.ResponseWriter, r *http.Request) {
 					out["shop"] = shop
 				}
 			}
+			// 全节点清单：定位「制作奶茶」「领取员工收益」等操作节点（如员工收益 1659）
+			var nfs []*milkTeaNodeBrief
+			collectMilkTeaNodes(tree, 0, &nfs)
+			out["nodes_full"] = nfs
 			// 原始字段树：累计营业额/销售额/营业速度/员工等字段映射的数据来源
 			st := &actTreeStats{Max: 4000}
 			out["tree"] = buildActTree(gb, 12, st)
-			out["tree_note"] = "原始 protobuf 字段树（f字段号）。店铺名/等级/营业额已映射（f121）；累计营业额/销售额/营业速度/员工的字段号待抓包对照后补充。"
+			out["tree_note"] = "原始 protobuf 字段树（f字段号）。店铺名/等级/累计营业额已映射（f121）；今日售出/营业速度/员工及制作奶茶、领取员工收益的操作协议待抓包对照后补充。"
 		} else {
 			out["group_error"] = actErrMsg(err)
 		}
@@ -220,4 +227,81 @@ func findMilkTeaShop(n *ActivityNode) *MilkTeaShop {
 		}
 	}
 	return nil
+}
+
+// milkTeaNodeBrief 全节点摘要（定位操作节点用）
+type milkTeaNodeBrief struct {
+	ID    int64  `json:"id"`
+	Title string `json:"title"`
+	Type  int64  `json:"type"`
+	Depth int    `json:"depth"`
+}
+
+func collectMilkTeaNodes(n *ActivityNode, depth int, out *[]*milkTeaNodeBrief) {
+	if n == nil {
+		return
+	}
+	if n.Info != nil {
+		*out = append(*out, &milkTeaNodeBrief{ID: n.Info.ID, Title: n.Info.Title, Type: n.Info.Type, Depth: depth})
+	}
+	for _, c := range n.Children {
+		collectMilkTeaNodes(c, depth+1, out)
+	}
+}
+
+// ----- POST /api/activity/milktea/probe 协议探测（游戏内抓包用） -----
+//
+// 组装 ActivityService.Operate{1:id, 2:cmd, ext_field:ext_hex} 发往游戏网关，
+// 回包原文以字段树返回（错误时带回服务端报错原文）。用于定位制作奶茶/领取员工收益
+// 等操作的真实 id/cmd 组合；探测历史记录在浏览器端，避免误发业务操作请先在诊断页确认节点。
+func handleMilkTeaProbe(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		AccountID string `json:"accountId"`
+		ID        int64  `json:"id"`
+		Cmd       int64  `json:"cmd"`
+		ExtField  int    `json:"ext_field"`
+		ExtHex    string `json:"ext_hex"`
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, 8192))
+	if err == nil && len(body) > 0 {
+		_ = json.Unmarshal(body, &req)
+	}
+	accountID := resolveAccountIDWithOwner(r, req.AccountID)
+	if accountID == "" {
+		writeJSONMap(w, "ok", false, "error", "缺少 accountId")
+		return
+	}
+	sent := map[string]interface{}{"id": req.ID, "cmd": req.Cmd, "ext_field": req.ExtField, "ext_hex": req.ExtHex}
+
+	b := proto.NewBuilder()
+	b.FieldInt64(1, req.ID)
+	b.FieldInt64(2, req.Cmd)
+	if req.ExtField > 0 && req.ExtHex != "" {
+		if raw, hexErr := hex.DecodeString(strings.TrimSpace(req.ExtHex)); hexErr == nil {
+			b.FieldBytes(req.ExtField, raw)
+		} else {
+			writeJSON(w, map[string]interface{}{"ok": false, "account": accountID, "sent": sent, "error": "ext_hex 不是合法十六进制: " + hexErr.Error()})
+			return
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	rep, err := rpcRequest(ctx, accountID, actSvc, "Operate", b.Bytes(), 15*time.Second)
+	if err != nil {
+		writeJSON(w, map[string]interface{}{
+			"ok":      false,
+			"account": accountID,
+			"sent":    sent,
+			"error":   actErrMsg(err),
+		})
+		return
+	}
+	st := &actTreeStats{Max: 800}
+	writeJSON(w, map[string]interface{}{
+		"ok":      true,
+		"account": accountID,
+		"sent":    sent,
+		"reply":   buildActTree(rep, 10, st),
+	})
 }

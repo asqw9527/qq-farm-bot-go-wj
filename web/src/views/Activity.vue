@@ -981,6 +981,37 @@ function fmtRevenue(v) {
   return x >= 10000 ? (x / 10000).toFixed(1) + ' 万' : String(x)
 }
 
+function fmtMilkTeaDate(ts) {
+  const d = new Date((Number(ts) || 0) * 1000)
+  if (isNaN(d.getTime())) return '—'
+  return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`
+}
+
+/* ---------- 奶茶协议探测（Operate 试探，游戏内抓包用） ---------- */
+const mtProbe = reactive({ id: '', cmd: '', ext_field: '', ext_hex: '', result: '', busy: false })
+
+async function mtProbeSend() {
+  const a = acc(); if (!a) return
+  mtProbe.busy = true
+  try {
+    const { data } = await api.post('/api/activity/milktea/probe', {
+      accountId: a,
+      id: Number(mtProbe.id) || 0,
+      cmd: Number(mtProbe.cmd) || 0,
+      ext_field: Number(mtProbe.ext_field) || 0,
+      ext_hex: (mtProbe.ext_hex || '').trim(),
+    })
+    mtProbe.result = JSON.stringify(data, null, 1)
+    if (data && data.ok) app.success('探测成功，回包原文已显示')
+    else app.error((data && data.error) || '探测失败')
+  } catch (e) {
+    mtProbe.result = JSON.stringify((e && e.response && e.response.data) || { error: String(e) }, null, 1)
+    app.error('探测失败')
+  } finally {
+    mtProbe.busy = false
+  }
+}
+
 function copyMilkTeaTree() {
   const t = milkTea.data && milkTea.data.tree
   if (!t) return
@@ -1101,23 +1132,26 @@ onUnmounted(() => { window.removeEventListener('account-switched', onSwitched) }
       <div v-else class="act-empty">该活动暂无可展示的面板</div>
     </div>
 
-    <!-- ===== 奶茶店铺（S4 奶茶热销中） ===== -->
+    <!-- ===== 奶茶店铺（S4 奶茶热销中，样式对标游戏内「今日经营概览」） ===== -->
     <div v-else-if="curPanel && curPanel.key === 'milktea'">
       <template v-if="milkTea.data">
-        <!-- 店铺信息（对标游戏内奶茶店界面） -->
+        <!-- 今日经营概览 -->
         <div class="act-card">
           <div class="act-card-hd">
-            <h4>🧋 {{ (milkTea.data.shop && milkTea.data.shop.name) || (milkTea.data.activity && milkTea.data.activity.title) || '奶茶店铺' }}</h4>
-            <span class="act-badge" v-if="milkTea.data.shop">店铺等级 Lv.{{ n(milkTea.data.shop.level) }}</span>
+            <h4>🧋 今日经营概览</h4>
+            <span class="act-badge" v-if="milkTea.data.activity && milkTea.data.activity.start_time">营业期 {{ fmtMilkTeaDate(milkTea.data.activity.start_time) }} — {{ fmtMilkTeaDate(milkTea.data.activity.end_time) }}</span>
           </div>
-          <div class="act-stats">
-            <span>营业额 <b>{{ milkTea.data.shop ? fmtRevenue(milkTea.data.shop.revenue) : '—' }}</b></span>
-            <span>累计营业额 <b>{{ milkTea.data.shop && milkTea.data.shop.revenue_total ? fmtRevenue(milkTea.data.shop.revenue_total) : '—' }}</b></span>
-            <span>销售额 <b>{{ milkTea.data.shop && milkTea.data.shop.revenue_sales ? fmtRevenue(milkTea.data.shop.revenue_sales) : '—' }}</b></span>
-            <span>营业速度 <b>{{ milkTea.data.shop && milkTea.data.shop.revenue_speed ? fmtRevenue(milkTea.data.shop.revenue_speed) + '/h' : '—' }}</b></span>
+          <div class="act-stats" v-if="milkTea.data.shop">
+            <span>店铺等级 <b>Lv.{{ n(milkTea.data.shop.level) }}</b><em>店铺成长等级</em></span>
+            <span>累计营业额 <b>{{ fmtRevenue(milkTea.data.shop.revenue) }}</b><em>金币营业额</em></span>
+            <span>今日售出 <b>{{ milkTea.data.shop.today_cups != null ? n(milkTea.data.shop.today_cups) + ' 杯' : '—' }}</b><em>今日销售杯数</em></span>
+            <span>营业速度 <b>{{ milkTea.data.shop.speed != null ? n(milkTea.data.shop.speed) + ' 杯/小时' : '—' }}</b><em>自动积累中</em></span>
           </div>
-          <div class="act-hint" v-if="milkTea.data.shop">店铺名 / 等级 / 营业额已实锤映射（f121）；累计营业额 / 销售额 / 营业速度的字段号待补充抓包后开放；制作奶茶与领取员工收益需抓包对应操作协议。</div>
+          <div class="act-hint" v-if="milkTea.data.shop">店铺名 / 等级 / 累计营业额已实锤映射（f121）；今日售出与营业速度的字段号待抓包对照（见下方协议诊断的 extra 候选值）。经营小贴士：收银台满载时会暂停营业，领取收益后继续营业；奶茶券可用于兑换和企鹅。</div>
           <div class="act-hint" v-else>店铺状态暂未获取到（活动回包未携带 field121，可能活动数据未同步）。展开下方「协议诊断」复制字段树即可继续映射。</div>
+          <div class="act-stats" v-if="milkTea.data.shop">
+            <span>当前店铺 <b>{{ milkTea.data.shop.name || '—' }}</b><em>店铺正在营业</em></span>
+          </div>
         </div>
 
         <!-- 员工列表 -->
@@ -1138,15 +1172,6 @@ onUnmounted(() => { window.removeEventListener('account-switched', onSwitched) }
           <button class="act-btn" style="padding:4px 14px;font-size:13px" @click="loadMilkTea">刷新数据</button>
         </div>
 
-        <!-- 兑换商店 -->
-        <div class="act-card" v-if="(milkTea.data.exchange_shop || []).length">
-          <div class="act-card-hd"><h4>🛍️ 兑换商店（{{ milkTea.data.exchange_shop.length }}）</h4></div>
-          <div v-for="(it, i) in milkTea.data.exchange_shop" :key="i" class="act-tier">
-            <span class="lv"><img v-if="it.image" class="act-ic-sm" :src="it.image" alt="" loading="lazy" @error="$event.target.remove()"> {{ it.name || ('#' + it.id) }}</span>
-            <span class="rw"><em>{{ it.status_label || '' }}</em><em v-if="it.price"> {{ it.price }} {{ it.currency_name || '' }}</em></span>
-          </div>
-        </div>
-
         <!-- 协议诊断 -->
         <div class="act-card">
           <div class="act-card-hd">
@@ -1156,7 +1181,20 @@ onUnmounted(() => { window.removeEventListener('account-switched', onSwitched) }
               <button class="act-btn" style="padding:2px 10px;font-size:12px" @click="milkTea.showTree = !milkTea.showTree">{{ milkTea.showTree ? '收起' : '展开' }}</button>
             </span>
           </div>
-          <div class="act-hint">店铺等级 / 累计营业额 / 销售额 / 营业速度 / 员工数据藏在游戏网关回包的未映射字段中。展开后把字段树复制发给开发者，即可完成最终映射。</div>
+          <div class="act-hint">店铺等级 / 今日售出 / 营业速度 / 员工数据藏在游戏网关回包的未映射字段中。f121 店铺状态候选值（对照游戏内数值确认字段号）：<template v-if="milkTea.data.shop && milkTea.data.shop.extra">{{ Object.entries(milkTea.data.shop.extra).map(([k, v]) => k + '=' + v).join('，') || '（内层无其余 varint 字段）' }}</template><template v-else>—</template></div>
+          <div class="act-hint" style="margin-top:6px">操作节点探测：在节点清单里找到「制作奶茶」「领取员工收益」等节点 id，填入下方发送 Operate 试探（回包原文以字段树返回，错误时返回服务端报错原文）。</div>
+          <div style="display:flex;flex-wrap:wrap;gap:6px;margin:8px 0;align-items:center">
+            <input v-model="mtProbe.id" placeholder="节点 id，如 1659" style="width:130px;padding:4px 8px;font-size:12px;border:1px solid #d9d9d9;border-radius:6px">
+            <input v-model="mtProbe.cmd" placeholder="cmd，如 1" style="width:90px;padding:4px 8px;font-size:12px;border:1px solid #d9d9d9;border-radius:6px">
+            <input v-model="mtProbe.ext_field" placeholder="ext字段号(选填)" style="width:120px;padding:4px 8px;font-size:12px;border:1px solid #d9d9d9;border-radius:6px">
+            <input v-model="mtProbe.ext_hex" placeholder="ext hex(选填，如 0801)" style="width:150px;padding:4px 8px;font-size:12px;border:1px solid #d9d9d9;border-radius:6px">
+            <button class="act-btn" :class="{ disabled: mtProbe.busy }" :disabled="mtProbe.busy" style="padding:4px 14px;font-size:12px" @click="mtProbeSend">{{ mtProbe.busy ? '发送中…' : '发送 Operate' }}</button>
+          </div>
+          <pre v-if="mtProbe.result" style="max-height:260px;overflow:auto;font-size:11px;white-space:pre-wrap;word-break:break-all;margin:8px 0 0;border:1px solid #eee;border-radius:6px;padding:8px;background:#fafafa">{{ mtProbe.result }}</pre>
+          <details style="margin-top:8px">
+            <summary style="cursor:pointer;font-size:12px;color:#666">节点清单（nodes_full，含制作奶茶/员工收益等操作节点）</summary>
+            <pre style="max-height:240px;overflow:auto;font-size:11px;white-space:pre-wrap;margin:8px 0 0">{{ JSON.stringify(milkTea.data.nodes_full || [], null, 1) }}</pre>
+          </details>
           <pre v-if="milkTea.showTree && milkTea.data.tree" style="max-height:300px;overflow:auto;font-size:11px;white-space:pre-wrap;word-break:break-all;margin:8px 0 0">{{ JSON.stringify(milkTea.data.tree, null, 1) }}</pre>
         </div>
       </template>

@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/asqw9527/qq-farm-bot-go-wj/proto"
@@ -170,11 +171,15 @@ type ActivityNode struct {
 // MilkTeaShop S4 奶茶热销中：节点 field121 店铺实时状态。
 // 字段映射实锤自 2026-10-23 协议诊断树（对照游戏内截图：店铺等级 7 / 营业额 178245）：
 //
-//	f121{ f1{ f2=店铺名(string) f4=店铺等级(varint) f5=营业额(varint) } }
+//	f121{ f1{ f2=店铺名(string) f4=店铺等级(varint) f5=累计营业额(varint) } }
+//	游戏内界面还有：今日售出(杯)、营业速度(杯/小时)、经营状态 —— 对应字段号
+//	待抓包映射，先全量保留在 Extra / Raw 中对照。
 type MilkTeaShop struct {
-	Name    string `json:"name"`    // 店铺名，如「奶茶冲鸭」
-	Level   int64  `json:"level"`   // 店铺等级
-	Revenue int64  `json:"revenue"` // 当前营业额
+	Name    string           `json:"name"`            // 店铺名，如「奶茶冲鸭」
+	Level   int64            `json:"level"`           // 店铺等级
+	Revenue int64            `json:"revenue"`         // 累计营业额（金币）
+	Extra   map[string]int64 `json:"extra,omitempty"` // 内层其余 varint 字段（待映射：今日售出/营业速度等）
+	Raw     interface{}      `json:"raw,omitempty"`   // f121 原始字段树（协议诊断对照用）
 }
 
 // --- 解析函数 ---
@@ -336,16 +341,26 @@ func parseActivityNode(raw []byte) *ActivityNode {
 		node.HasDraw = true
 		node.DrawInfo = drawRaw
 	}
-	// S4 奶茶店铺状态：节点 field121{1:{2:名,4:等级,5:营业额}}
+	// S4 奶茶店铺状态：节点 field121{1:{2:名,4:等级,5:累计营业额,...}}
+	// 全量保留 f121 原始树（Raw）+ 内层其余 varint（Extra），供对照游戏内数值映射字段号
 	if shopRaw := actBytes(fs, 121); len(shopRaw) > 0 {
+		shop := &MilkTeaShop{Raw: buildActTree(shopRaw, 8, &actTreeStats{Max: 600})}
 		if inner := actBytes(readActFields(shopRaw), 1); len(inner) > 0 {
 			sfs := readActFields(inner)
-			if s := actStr(sfs, 2); s != "" || actNum(sfs, 4) > 0 {
-				node.MilkTeaShop = &MilkTeaShop{
-					Name:    s,
-					Level:   actNum(sfs, 4),
-					Revenue: actNum(sfs, 5),
+			shop.Name = actStr(sfs, 2)
+			shop.Level = actNum(sfs, 4)
+			shop.Revenue = actNum(sfs, 5)
+			for _, f := range sfs {
+				if f.Wire != 0 || f.No == 2 || f.No == 4 || f.No == 5 {
+					continue
 				}
+				if shop.Extra == nil {
+					shop.Extra = map[string]int64{}
+				}
+				shop.Extra["f"+strconv.Itoa(f.No)] = f.Varint
+			}
+			if shop.Name != "" || shop.Level > 0 {
+				node.MilkTeaShop = shop
 			}
 		}
 	}
