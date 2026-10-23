@@ -361,8 +361,8 @@ func handleMilkTeaProbe(w http.ResponseWriter, r *http.Request) {
 
 	// 扫描模式：对同一节点依次发多个 cmd，收集每个的服务端响应/报错原文
 	if req.Sweep && len(req.Cmds) > 0 {
-		if len(req.Cmds) > 24 {
-			req.Cmds = req.Cmds[:24]
+		if len(req.Cmds) > 32 {
+			req.Cmds = req.Cmds[:32]
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 120*time.Second)
 		defer cancel()

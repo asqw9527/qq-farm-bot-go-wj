@@ -1019,7 +1019,7 @@ async function mtSweepCmds() {
   mtProbe.busy = true
   try {
     const { data } = await api.post('/api/activity/milktea/probe', {
-      accountId: a, sweep: true, id: Number(mtProbe.id) || 0, cmds: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+      accountId: a, sweep: true, id: Number(mtProbe.id) || 0, cmds: Array.from({ length: 30 }, (_, i) => i + 1),
     })
     mtProbe.result = JSON.stringify(data, null, 1)
     const blob = new Blob([JSON.stringify(data, null, 1)], { type: 'application/json' })
