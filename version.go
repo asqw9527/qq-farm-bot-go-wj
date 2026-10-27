@@ -1,4 +1,4 @@
 package main
 
-var buildVersion = "mtact6"
-var buildTime = "2026-10-27T17:40:00Z"
+var buildVersion = "mtact7"
+var buildTime = "2026-10-27T17:55:00Z"

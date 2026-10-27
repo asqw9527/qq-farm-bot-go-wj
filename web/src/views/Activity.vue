@@ -1026,7 +1026,7 @@ const mtAct = reactive({
 })
 
 function mtActLabel(a) {
-  return ({ craft: '制作奶茶', claim: '领取营业值', hire: '添加员工', scan: '协议扫描', custom: '自定义' })[a] || a
+  return ({ craft: '制作奶茶', claim: '领取营业值', hire: '添加员工', scan: '协议扫描', scanlow: '低区段扫描', scanmap: 'cmd 地图扫描', custom: '自定义' })[a] || a
 }
 
 async function mtDoAction(action) {
@@ -1054,12 +1054,25 @@ async function mtDoAction(action) {
     if (action === 'hire') payload.uid = Number(mtAct.uid) || 0
     if (action === 'scan') {
       payload.cmd = Number(mtAct.scanCmd) || 62
+      payload.cmd_list = String(mtAct.scanCmd || '62') // 支持列表/范围，如 57,62 或 50-90
       payload.ext_from = Number(mtAct.scanExtFrom) || 100
       payload.ext_to = Number(mtAct.scanExtTo) || 130
       payload.form = mtAct.scanForm
       payload.fruitId = Number(mtAct.scanFruitId) || 0
       payload.recipeId = Number(mtAct.recipeId) || 0
       payload.no_ext = !!mtAct.scanNoExt
+    }
+    if (action === 'scanlow') {
+      // 扫 ext 1~60：覆盖 proto 里唯一的通用参数位 field 3（DrawParams）
+      payload.action = 'scan'
+      payload.cmd = Number(mtAct.scanCmd) || 62
+      payload.cmd_list = String(mtAct.scanCmd || '62')
+      payload.ext_from = 1
+      payload.ext_to = 60
+      payload.form = mtAct.scanForm
+      payload.fruitId = Number(mtAct.scanFruitId) || 0
+      payload.recipeId = Number(mtAct.recipeId) || 0
+      payload.no_ext = false
     }
     if (action === 'scanmap') {
       payload.action = 'scan'
@@ -1092,7 +1105,7 @@ function mtAttemptLine(t) {
   let verdict
   if (!t.ok) verdict = t.error || '无返回'
   else if (t.has_payload) verdict = '✅ 有实体回包（真产生业务结果）'
-  else verdict = '⚠ 无错但回包 f' + (t.cmd + 105) + ' 为空（多为查询/状态类，非真操作）'
+  else verdict = '⚠ 无错但回包 ' + (t.payload_key || ('f' + (t.cmd + 105))) + ' 为空（多为查询/状态类，非真操作）'
   let line = parts.join(' · ') + ' → ' + verdict
   if (t.ok && t.reply) {
     const s = JSON.stringify(t.reply)
@@ -1618,6 +1631,7 @@ onUnmounted(() => { window.removeEventListener('account-switched', onSwitched) }
               <input type="checkbox" v-model="mtAct.scanNoExt" /> 不带 ext
             </label>
             <button class="act-btn" :class="{ disabled: mtAct.busy }" :disabled="mtAct.busy" @click="mtDoAction('scan')">🔬 开始扫描</button>
+            <button class="act-btn" :class="{ disabled: mtAct.busy }" :disabled="mtAct.busy" @click="mtDoAction('scanlow')">🎯 扫 ext 1-60（含字段3）</button>
             <button class="act-btn" :class="{ disabled: mtAct.busy }" :disabled="mtAct.busy" @click="mtDoAction('scanmap')">🗺 扫 cmd 地图 50-90</button>
             <span v-if="mtAct.busy" style="font-size:12px;color:#888">扫描中…（并发 4，请稍候）</span>
           </div>
@@ -1627,6 +1641,12 @@ onUnmounted(() => { window.removeEventListener('account-switched', onSwitched) }
             再横扫字段号区间 —— <b>报错与基线不同</b>、或<b>无错返回</b>的字段号，就是服务端真正解析并消费的那个。
             载荷形态参照 proto 中真实存在的 <code>QingmeiWineStartParams{repeated Item items=1}</code>，
             <code>corepb.Item{1:id, 2:count}</code>。单次请求上限 240。
+            <div style="margin-top:4px;color:#A32D2D">
+              ⚠ 已扫过 100~130（31 个字段号全无差异）。<b>下一步优先扫 1~60</b>：上游 proto 里
+              <code>OperateRequest</code> 只有 <b>field 3（DrawParams{1:id,2:count,3:cost}）</b> 是通用参数位，
+              101/102/103/107/112/113/114 都是各玩法专属。而 25 个 cmd 齐报「活动参数错误」，
+              很可能正是缺 field 3。点「🎯 扫 ext 1-60」即可。
+            </div>
           </div>
 
           <template v-if="mtAct.result && mtAct.result.action === 'scan'">

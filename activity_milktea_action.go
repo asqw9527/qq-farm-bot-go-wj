@@ -59,16 +59,46 @@ type milkTeaAttempt struct {
 	OK         bool        `json:"ok"`                // 服务端无错返回
 	HasPayload bool        `json:"has_payload"`       // 回包 f(cmd+105) 有实体载荷 → 真产生了业务结果
 	Error      string      `json:"error,omitempty"`   // 服务端业务报错原文
-	Payload    interface{} `json:"payload,omitempty"` // 回包 f(cmd+105) 载荷（空 = 仅查询/状态返回）
+	Payload    interface{} `json:"payload,omitempty"` // 回包业务载荷（空 = 仅查询/状态返回）
+	PayloadKey string      `json:"payload_key,omitempty"` // 载荷实际字段名（f160 / f179 等）
 	Reply      interface{} `json:"reply,omitempty"`   // 回包字段树摘要（去 f3）
 }
 
-// mtPayloadOf 取回包中该 cmd 对应的业务载荷字段（规律：响应字段号 = cmd + 105）
+// mtPayloadOf 取回包中该 cmd 对应的业务载荷字段。
+//
+// 规律（2026-10-27 cmd 50~90 全扫实测校准）：
+//   - 主规律：响应业务字段号 = cmd + 105（55→f160、56→f161、58→f163、
+//     63→f168、66→f171、67→f172…）
+//   - 特例：cmd 79 的载荷是 f179 = cmd + 100，不是 f184
+//
+// 因此两个都检查：+105 优先（且需非空），否则回落到 +100。
 func mtPayloadOf(cmd int64, tree map[string]interface{}) interface{} {
 	if tree == nil {
 		return nil
 	}
-	return tree["f"+strconv.FormatInt(cmd+105, 10)]
+	if v, ok := tree["f"+strconv.FormatInt(cmd+105, 10)]; ok && mtPayloadNonEmpty(v) {
+		return v
+	}
+	if v, ok := tree["f"+strconv.FormatInt(cmd+100, 10)]; ok {
+		return v
+	}
+	return nil
+}
+
+// mtPayloadField 该 cmd 的载荷字段名（面板展示用，如 f160 / f179）
+func mtPayloadField(cmd int64, tree map[string]interface{}) string {
+	if tree == nil {
+		return ""
+	}
+	k105 := "f" + strconv.FormatInt(cmd+105, 10)
+	if v, ok := tree[k105]; ok && mtPayloadNonEmpty(v) {
+		return k105
+	}
+	k100 := "f" + strconv.FormatInt(cmd+100, 10)
+	if _, ok := tree[k100]; ok {
+		return k100
+	}
+	return k105
 }
 
 // mtPayloadNonEmpty 载荷是否有实体内容（空串 / 空表 / nil 均视为「无实体」）
@@ -435,6 +465,7 @@ func mtRunScan(ctx context.Context, accountID string, shopID int64, cmds []int64
 				p := mtPayloadOf(j.cmd, tree)
 				it.Payload = p
 				it.HasPayload = mtPayloadNonEmpty(p)
+				it.PayloadKey = mtPayloadField(j.cmd, tree)
 				it.Reply = mtReplyExcerpt(tree)
 			}
 			res[i] = it
@@ -502,6 +533,7 @@ func handleMilkTeaAction(w http.ResponseWriter, r *http.Request) {
 			p := mtPayloadOf(cmd, tree)
 			it.Payload = p
 			it.HasPayload = mtPayloadNonEmpty(p)
+			it.PayloadKey = mtPayloadField(cmd, tree)
 			it.Reply = mtReplyExcerpt(tree)
 		}
 		attempts = append(attempts, it)
@@ -597,6 +629,7 @@ func handleMilkTeaAction(w http.ResponseWriter, r *http.Request) {
 			p := mtPayloadOf(baseCmd, tree)
 			baseIt.Payload = p
 			baseIt.HasPayload = mtPayloadNonEmpty(p)
+			baseIt.PayloadKey = mtPayloadField(baseCmd, tree)
 			baseIt.Reply = mtReplyExcerpt(tree)
 		}
 		baseline := baseIt.Error
