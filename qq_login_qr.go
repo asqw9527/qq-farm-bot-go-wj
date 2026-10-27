@@ -90,7 +90,8 @@ func napcatWebuiLogin(c qqCreds) (string, error) {
 		return "", nil
 	}
 	url := strings.TrimRight(c.Base, "/") + "/api/auth/login"
-	payload, _ := json.Marshal(map[string]string{"token": sha256Hex([]byte(c.WebUIToken + ".napcat"))})
+	// NapCat WebUI 登录：提交 hash = SHA256(token + ".napcat")，字段名是 hash（非 token）
+	payload, _ := json.Marshal(map[string]string{"hash": sha256Hex([]byte(c.WebUIToken + ".napcat"))})
 	req, _ := http.NewRequest("POST", url, strings.NewReader(string(payload)))
 	req.Header.Set("Content-Type", "application/json")
 	client := &http.Client{Timeout: 10 * time.Second}
@@ -389,7 +390,7 @@ func handleQQQrStart(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, map[string]interface{}{"ok": true, "data": map[string]interface{}{
 			"state": "error", "error": aerr.Error(), "needConfig": true,
-			"hint": "手机 QQ 扫码需要通过 NapCat WebUI 获取二维码，请填写 WebUI Token",
+			"hint": "NapCat WebUI 启用了登录令牌。Token 取值：①部署时 setup.sh 末尾打印的 Token；②`docker exec napcat-farm printenv WEBUI_TOKEN`；③`cat deploy/napcat/config/webui.json` 里的 token 字段。填到下方 WebUI Token 后重试。",
 		}})
 		return
 	}

@@ -16,6 +16,10 @@ ZIP_URL="https://github.com/fubiwangluo/qq-code/releases/latest/download/${PLUGI
 
 TOKEN="${1:-}"
 if [ -z "$TOKEN" ]; then
+  # 幂等：复用已运行容器的 token，避免重跑脚本使已登录的 QQ 掉线
+  TOKEN="$(docker exec "$CONTAINER" printenv WEBUI_TOKEN 2>/dev/null || true)"
+fi
+if [ -z "$TOKEN" ]; then
   TOKEN="$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')"
 fi
 
@@ -144,6 +148,27 @@ for i in $(seq 1 20); do
   fi
   sleep 3
 done
+
+echo "==> [7/7] 将 WebUI Token 注入 BOT 服务环境变量（实现面板零配置扫码，可选）"
+DROPIN_DIR="/etc/systemd/system/go-farm-bot.service.d"
+if systemctl list-unit-files 2>/dev/null | grep -q "^go-farm-bot.service"; then
+  mkdir -p "$DROPIN_DIR"
+  cat > "$DROPIN_DIR/napcat.conf" <<EOF2
+[Service]
+Environment=NAPCAT_BASE=http://127.0.0.1:6099
+Environment=NAPCAT_WEBUI_TOKEN=${TOKEN}
+EOF2
+  systemctl daemon-reload
+  if systemctl restart go-farm-bot >/dev/null 2>&1; then
+    echo "    go-farm-bot 已重启并载入 Token：面板「扫码登录 → QQ」进页签直接出二维码，无需手动填。"
+  else
+    echo "    go-farm-bot 重启失败（不影响 NapCat）。请手动重启服务或给进程加 NAPCAT_WEBUI_TOKEN=${TOKEN} 后重启。"
+  fi
+else
+  echo "    未检测到 go-farm-bot systemd 服务，跳过自动注入。"
+  echo "    若想零配置，请给 BOT 进程加环境变量 NAPCAT_BASE=http://127.0.0.1:6099 与"
+  echo "    NAPCAT_WEBUI_TOKEN=${TOKEN} 后重启；否则在面板手动填上方 Token 即可。"
+fi
 
 cat <<EOF
 
