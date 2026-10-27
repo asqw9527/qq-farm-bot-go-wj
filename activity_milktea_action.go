@@ -114,82 +114,82 @@ func mtExtBuild(kvs ...[2]int64) []byte {
 	return b.Bytes()
 }
 
-// mtCraftCandidates 制作奶茶（cmd 62）的 ext 载荷候选
-func mtCraftCandidates(recipeID, fruitID int64) []struct {
+// mtExtPair 一个候选载荷
+type mtExtPair struct {
 	Desc string
 	Data []byte
-} {
-	var out []struct {
-		Desc string
-		Data []byte
+}
+
+// mtExtNested 组装嵌套子消息：{ field: { kvs... } }
+func mtExtNested(field int, kvs ...[2]int64) []byte {
+	sub := proto.NewBuilder()
+	for _, kv := range kvs {
+		sub.FieldInt64(int(kv[0]), kv[1])
 	}
-	add := func(label string, id int64) {
-		out = append(out,
-			struct {
-				Desc string
-				Data []byte
-			}{label + "→f1", mtExtBuild([2]int64{1, id})},
-			struct {
-				Desc string
-				Data []byte
-			}{label + "→f2", mtExtBuild([2]int64{2, id})},
-			struct {
-				Desc string
-				Data []byte
-			}{label + "→f3", mtExtBuild([2]int64{3, id})},
-			struct {
-				Desc string
-				Data []byte
-			}{"f1=" + label + ", f2=1", mtExtBuild([2]int64{1, id}, [2]int64{2, 1})},
-			struct {
-				Desc string
-				Data []byte
-			}{"f1=1, f2=" + label, mtExtBuild([2]int64{1, 1}, [2]int64{2, id})},
-		)
+	b := proto.NewBuilder()
+	b.FieldMessage(field, sub.Bytes())
+	return b.Bytes()
+}
+
+// mtCraftCandidates 制作奶茶（cmd 62）的 ext 载荷候选
+//
+// 依据：Node 版 activitypb.proto 里每种玩法占一个专属扩展字段号（101 随机商店 /
+// 102 兑换商店 / 103 青梅领取…），且参数形态高度一致 —— {1:id, 2:count}。
+// 奶茶对应 121，故这里覆盖「扁平 / 嵌套 / repeated」三类形态。
+func mtCraftCandidates(recipeID, fruitID, count int64) []mtExtPair {
+	if count <= 0 {
+		count = 1
+	}
+	var out []mtExtPair
+	add := func(desc string, data []byte) { out = append(out, mtExtPair{Desc: desc, Data: data}) }
+
+	// ① 扁平：{1:id} / {1:id,2:count} / {2:…} / {3:…}
+	idVariants := func(label string, id int64) {
+		add(label+"→f1", mtExtBuild([2]int64{1, id}))
+		add(label+"→f1 + f2=count", mtExtBuild([2]int64{1, id}, [2]int64{2, count}))
+		add(label+"→f2", mtExtBuild([2]int64{2, id}))
+		add(label+"→f2 + f3=count", mtExtBuild([2]int64{2, id}, [2]int64{3, count}))
+		add(label+"→f3", mtExtBuild([2]int64{3, id}))
+		// repeated f1：[id]（长度 1 的数组，常见于 repeated recipeIds）
+		rep := proto.NewBuilder()
+		rep.FieldInt64(1, id)
+		add(label+"→f1[]", rep.Bytes())
 	}
 	if recipeID > 0 {
-		add("配方id", recipeID)
+		idVariants("配方id", recipeID)
 	}
 	if fruitID > 0 && fruitID != recipeID {
-		add("果实id", fruitID)
+		idVariants("果实id", fruitID)
 	}
-	// 空 ext 兜底（实锤：cmd 62 不带 ext 时报「选择的果实无效」）
-	out = append(out, struct {
-		Desc string
-		Data []byte
-	}{"空 ext", nil})
+
+	// ② 嵌套：121:{1:{1:id,2:count}}、121:{2:{1:id}}（对应 corepb.Item 形态）
+	if recipeID > 0 {
+		add("121:{1:{1:配方id,2:count}}", mtExtNested(1, [2]int64{1, recipeID}, [2]int64{2, count}))
+		add("121:{1:{1:配方id}}", mtExtNested(1, [2]int64{1, recipeID}))
+		add("121:{2:{1:配方id}}", mtExtNested(2, [2]int64{1, recipeID}))
+	}
+	if fruitID > 0 && fruitID != recipeID {
+		add("121:{1:{1:果实id,2:count}}", mtExtNested(1, [2]int64{1, fruitID}, [2]int64{2, count}))
+		add("121:{1:{1:果实id}}", mtExtNested(1, [2]int64{1, fruitID}))
+	}
+
+	// ③ 空 ext 兜底（实锤：cmd 62 不带 ext 时报「选择的果实无效」）
+	add("空 ext", nil)
 	return out
 }
 
 // mtHireCandidates 添加员工（cmd 57 候选）的 ext 载荷候选
-func mtHireCandidates(uid int64) []struct {
-	Desc string
-	Data []byte
-} {
-	var out []struct {
-		Desc string
-		Data []byte
-	}
+func mtHireCandidates(uid int64) []mtExtPair {
+	var out []mtExtPair
+	add := func(desc string, data []byte) { out = append(out, mtExtPair{Desc: desc, Data: data}) }
 	if uid > 0 {
-		out = append(out,
-			struct {
-				Desc string
-				Data []byte
-			}{"uid→f1", mtExtBuild([2]int64{1, uid})},
-			struct {
-				Desc string
-				Data []byte
-			}{"uid→f2", mtExtBuild([2]int64{2, uid})},
-			struct {
-				Desc string
-				Data []byte
-			}{"f1=uid, f2=1", mtExtBuild([2]int64{1, uid}, [2]int64{2, 1})},
-		)
+		add("uid→f1", mtExtBuild([2]int64{1, uid}))
+		add("uid→f2", mtExtBuild([2]int64{2, uid}))
+		add("f1=uid + f2=1", mtExtBuild([2]int64{1, uid}, [2]int64{2, 1}))
+		add("121:{1:{1:uid}}", mtExtNested(1, [2]int64{1, uid}))
+		add("121:{1:{1:uid,2:1}}", mtExtNested(1, [2]int64{1, uid}, [2]int64{2, 1}))
 	}
-	out = append(out, struct {
-		Desc string
-		Data []byte
-	}{"空 ext", nil})
+	add("空 ext", nil)
 	return out
 }
 
@@ -205,6 +205,7 @@ func handleMilkTeaAction(w http.ResponseWriter, r *http.Request) {
 		ID        int64  `json:"id"`        // 店铺节点（留空自动定位）
 		RecipeID  int64  `json:"recipeId"`  // 制作奶茶：配方 id
 		FruitID   int64  `json:"fruitId"`   // 制作奶茶：果实/作物 id（cmd 58 配方 raw_f6）
+		Count     int64  `json:"count"`     // 制作奶茶：份数/数量（对应 {1:id,2:count} 的 count）
 		UID       int64  `json:"uid"`       // 添加员工：目标玩家 uid
 		Cmd       int64  `json:"cmd"`       // custom：指定 cmd
 		ExtField  int    `json:"ext_field"` // custom：ext 字段号
@@ -256,7 +257,7 @@ func handleMilkTeaAction(w http.ResponseWriter, r *http.Request) {
 			writeJSONMap(w, "ok", false, "error", "制作奶茶需要提供 recipeId（配方 id）")
 			return
 		}
-		for _, c := range mtCraftCandidates(req.RecipeID, req.FruitID) {
+		for _, c := range mtCraftCandidates(req.RecipeID, req.FruitID, req.Count) {
 			try(62, milkTeaExtField, c.Data, c.Desc)
 			if attempts[len(attempts)-1].OK {
 				break // 成功即停，不再继续发
@@ -270,10 +271,20 @@ func handleMilkTeaAction(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	case "claim":
+		// 两轮：先全部空载荷扫一遍，再带 {1:1} 载荷扫一遍（官方 params 多为 {1:id,2:count}）
 		for _, cmd := range mtClaimCmds {
 			try(cmd, 0, nil, "")
 			if attempts[len(attempts)-1].OK {
 				break
+			}
+		}
+		if !wasOK(attempts) {
+			one := mtExtBuild([2]int64{1, 1})
+			for _, cmd := range mtClaimCmds {
+				try(cmd, milkTeaExtField, one, "{1:1}")
+				if attempts[len(attempts)-1].OK {
+					break
+				}
 			}
 		}
 	case "custom":
@@ -327,15 +338,25 @@ func handleMilkTeaAction(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, out)
 }
 
+// wasOK 是否已有成功项
+func wasOK(list []milkTeaAttempt) bool {
+	for i := range list {
+		if list[i].OK {
+			return true
+		}
+	}
+	return false
+}
+
 // mtActionNote 未实锤协议的说明（面板展示用）
 func mtActionNote(action, shopID string) string {
 	switch action {
 	case "craft":
-		return "制作奶茶 cmd 62 已实锤（服务端会消费 ext 字段 121）。若全部返回「选择的果实无效」，说明载荷还需携带果实条目结构；可到下方协议诊断逐个试 ext 编码。"
+		return "制作奶茶 cmd 62 已实锤（服务端会消费 ext 字段 121）。候选已覆盖官方 params 形态：扁平 {1:id,2:count} / 嵌套 121:{1:{1:id,2:count}} / repeated f1[] / 空 ext。若仍全部「选择的果实无效」，说明该 cmd 需要的不是配方 id 而是果实条目结构，把每条返回发来分析即可。"
 	case "hire":
 		return "添加员工 cmd 未实锤（尝试 57）。候选不匹配时请到协议诊断卡用「扫描(cmd×ext)」扩大范围。"
 	case "claim":
-		return "领取店铺营业值 cmd 未实锤，已按候选列表逐一尝试。返回「活动参数错误」=该 cmd 不接受此 payload；若某一条无错返回即为命中。"
+		return "领取店铺营业值 cmd 未实锤，已按候选列表扫两轮（空载荷 → {1:1} 载荷）。返回「活动参数错误」=该 cmd 不接受此 payload；若某一条无错返回即为命中。"
 	}
 	return "自定义 Operate 尝试。"
 }

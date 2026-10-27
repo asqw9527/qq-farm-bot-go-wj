@@ -1018,7 +1018,7 @@ async function loadMilkTea() {
 
 /* ---------- 奶茶店铺操作（领取营业值 / 制作奶茶 / 添加员工） ---------- */
 // 协议尚未全部实锤：服务端会返回业务原文，这里逐候选尝试并原样回显，便于继续收敛。
-const mtAct = reactive({ busy: false, recipeId: '', uid: '', result: null })
+const mtAct = reactive({ busy: false, recipeId: '', uid: '', count: '1', result: null })
 
 function mtActLabel(a) {
   return ({ craft: '制作奶茶', claim: '领取营业值', hire: '添加员工' })[a] || a
@@ -1038,7 +1038,10 @@ async function mtDoAction(action) {
   mtAct.busy = true; mtAct.result = null
   try {
     const payload = { accountId: a, action }
-    if (action === 'craft') payload.recipeId = Number(mtAct.recipeId) || 0
+    if (action === 'craft') {
+      payload.recipeId = Number(mtAct.recipeId) || 0
+      payload.count = Number(mtAct.count) || 1
+    }
     if (action === 'hire') payload.uid = Number(mtAct.uid) || 0
     const { data } = await api.post('/api/activity/milktea/action', payload, { timeout: 180000 })
     mtAct.result = data
@@ -1505,6 +1508,13 @@ onUnmounted(() => { window.removeEventListener('account-switched', onSwitched) }
               <option value="">选择配方…</option>
               <option v-for="r in mtCraftOptions()" :key="'opt'+r.id" :value="r.id">{{ r.name }} #{{ r.id }}</option>
             </select>
+            <select v-model="mtAct.count" style="padding:4px 8px;font-size:12px;border:1px solid #d9d9d9;border-radius:6px;width:66px" title="制作份数（对应载荷 {1:id,2:count} 的 count）">
+              <option value="1">1 份</option>
+              <option value="2">2 份</option>
+              <option value="3">3 份</option>
+              <option value="5">5 份</option>
+              <option value="10">10 份</option>
+            </select>
             <button class="act-btn" :class="{ disabled: mtAct.busy }" :disabled="mtAct.busy" @click="mtDoAction('craft')">🧋 制作奶茶</button>
 
             <select v-model="mtAct.uid" style="padding:4px 8px;font-size:12px;border:1px solid #d9d9d9;border-radius:6px;max-width:160px">
@@ -1518,7 +1528,8 @@ onUnmounted(() => { window.removeEventListener('account-switched', onSwitched) }
 
           <div class="act-hint" style="margin-top:6px">
             ⚠️ 协议状态：制作奶茶 <b>cmd 62</b> 已实锤（ext 字段 121 会被引擎消费），但载荷编码未解出；
-            领取营业值与添加员工 <b>cmd 尚未实锤</b>。点击后会按候选组合真实发送，并把服务端返回原样列在下方，便于逐步收敛。
+            领取营业值与添加员工 <b>cmd / 载荷尚未实锤</b>。点击后会按候选组合真实发送，并把服务端返回原样列在下方。
+            候选已覆盖官方 params 形态（参考 Node 版 activitypb.proto）：扁平 <code>{1:id,2:count}</code>、嵌套 <code>121:{1:{1:id,2:count}}</code>、repeated <code>f1[]</code>、空载荷；领取类会扫两轮（空 → <code>{1:1}</code>）。
           </div>
 
           <template v-if="mtAct.result">
