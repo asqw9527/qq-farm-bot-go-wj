@@ -5,15 +5,23 @@ package main
 // 已实锤协议（ActivityService.Operate{1:id, 2:cmd}；节点 id = 店铺节点 2026110101，
 // 由活动 root 或从树中携带 field121 的节点确定，代码中自动探测）：
 //
-//	cmd 55 → f160  店铺全量：等级/累计营业额/配方累计销量/在岗员工/合同信息
-//	cmd 56 → f161  雇佣列表（可雇玩家员工 + 机器人员工）
+//	cmd 55 → f160  店铺全量：等级/累计营业额/配方累计销量/**在岗员工 f9**/合同信息
+//	cmd 56 → f161  雇佣候选池：**员工数组在 f161.f4**（f1/f2/f3 为标量）
 //	cmd 58 → f163  配方表（9 个配方）
 //	cmd 59 → f164  资产（1001 金币 / 1041 奶茶券 / 1042 …）
-//	cmd 67 → f172  今日统计：今日 0 点戳 / 制杯总数 / 按配方分布 / 按品质分布 / 员工班次 / 资产快照
-//	cmd 62 → 制作奶茶（需 ext 携带果实/配方参数，ext 字段号 121 有效，载荷编码待定）
+//	cmd 63 → f168  语义待定（含玩家信息 + f6{f1:2000,f2:136} 金额结构，疑似领取/结算）
+//	cmd 66 → f171  候选/榜单池（玩家信息 + 星座 + 数值，语义待定）
+//	cmd 67 → f172  今日统计：今日 0 点戳 / 制杯总数 / 按配方分布 / 按品质分布 / **员工班次 f7** / 资产快照
+//	cmd 62 → 制作奶茶（「选择的果实无效」；ext 101~130 全同错，参数位未锁定）
 //	cmd 79 → f179  服务器时间戳
 //
-// 规律：响应顶层业务字段号 = cmd + 105（55→f160、58→f163、59→f164、67→f172）。
+// 规律：响应顶层业务字段号 = cmd + 105（55→f160、58→f163、59→f164、67→f172）；
+// **特例 cmd 79 → f179 = cmd + 100**（2026-10-27 实测修正，此前误判为静默类）。
+//
+// 【在岗员工 vs 候选池 — 2026-10-27 用户实测厘清】
+//   · 在岗员工：cmd 55 的 f160.f1.f9（用户「已雇 1 人」→ 该数组 1 项）
+//   · 班次记录：cmd 67 的 f172.f7（含在岗员工的班次与收益 f10{f1:已付,f2:待领}）
+//   · 雇佣候选池：cmd 56 的 f161.f4（姓名集合与在岗员工不同 → 是可雇的人，不是已雇的人）
 
 import (
 	"context"
@@ -28,8 +36,12 @@ import (
 // milkTeaShopProbeCmd 用于定位店铺节点的握手命令（回包带 f160 即为店铺节点）
 const milkTeaShopProbeCmd = int64(55)
 
-// milkTeaOverviewCmds 概览需要并发拉取的全部命令
-var milkTeaOverviewCmds = []int64{55, 56, 58, 59, 67, 79}
+// milkTeaOverviewCmds 概览需要拉取的全部命令（均为不带 ext 即返回实体的只读查询）
+//
+// 66 与 63 为 2026-10-27 新增：两者不带 ext 均返回实体回包，行为与 55/56/58 一致，
+// 判定为查询类；63 若实为「领取」则每次刷新会自动领取一次（对玩家有利，保留）。
+// 注意：62（制作）不得加入此列表 —— 它会产生真实业务副作用。
+var milkTeaOverviewCmds = []int64{55, 56, 58, 59, 63, 66, 67, 79}
 
 // ----- 原始字段树取值辅助（buildActTree 输出：map[string]interface{} / []interface{} / int64 / string） -----
 
@@ -284,21 +296,79 @@ func handleMilkTeaOverview(w http.ResponseWriter, r *http.Request) {
 		out["assets"] = assets
 	}
 
-	// ---- cmd 56 → f161 雇佣列表 ----
+	// ---- cmd 56 → f161 雇佣列表（候选池）----
+	//
+	// 【2026-10-27 实测校正】此前按 f161.f1 取数组，但 f161.f1 是标量（值 1），
+	// 员工数组实际在 f161.f4 → hire_list 恒为空，「添加员工」下拉无选项。
+	//
+	// 实测结构（节点 2026110101）：
+	//   f161 = { f1:1, f2:40, f3:600,
+	//     f4:[ { f1:{f1:uid, f2:昵称, f3:{f13:头像}, f4:等级},
+	//            f3:9001, f4:"金牌销售", f5:1, f6:1793176288 }, ... ] }
+	//   · f1 推测为已雇数（用户实测：店铺已雇 1 人、另 1 个工位空着）
+	//   · f4[] 内玩家信息与 cmd55 的 f160.f1.f9 在岗员工、cmd67 的 f172.f7 班次
+	//     是同一嵌套形态，但姓名集合不同 → 判定 f161.f4 为「可雇佣候选池」，
+	//     而非在岗员工（在岗员工见 shop.employees，来自 cmd55 f160.f1.f9）。
 	if v := actTreeGet(raws[56], "f161"); v != nil {
+		out["hire_meta"] = map[string]interface{}{
+			"raw_f1": actTreeNum(v, "f1"), // 推测：当前已雇佣数
+			"raw_f2": actTreeNum(v, "f2"),
+			"raw_f3": actTreeNum(v, "f3"),
+		}
 		var hires []map[string]interface{}
-		for _, it := range actTreeArr(v, "f1") {
+		for _, it := range actTreeArr(v, "f4") {
 			hires = append(hires, map[string]interface{}{
-				"uid":        actTreeNum(it, "f1"),
-				"name":       actTreeStr(it, "f2"),
-				"user_level": actTreeNum(it, "f4"),
-				"role_id":    actTreeNum(it, "f7"),
-				"role":       actTreeStr(it, "f8"),
-				"wage":       actTreeNum(it, "f6"),
-				"avatar":     actTreeNum(it, "f3", "f13"),
+				"uid":        actTreeNum(it, "f1", "f1"),
+				"name":       actTreeStr(it, "f1", "f2"),
+				"user_level": actTreeNum(it, "f1", "f4"),
+				"avatar":     actTreeNum(it, "f1", "f3", "f13"),
+				"role_id":    actTreeNum(it, "f3"), // 实测 9001
+				"role":       actTreeStr(it, "f4"), // 实测「金牌销售」
+				"status":     actTreeNum(it, "f5"),
+				"expire_at":  actTreeNum(it, "f6"), // 推测：雇佣到期时间戳
 			})
 		}
 		out["hire_list"] = hires
+	}
+
+	// ---- cmd 66 → f171 候选/榜单池 ----
+	// 实测：f171.f1[] = { f1:{f1:uid,f2:昵称,f3:{f13:头像},f4:等级},
+	//                     f2:"白羊座"(星座), f3:11, f4:472723, f5:1 }
+	// 语义待定（访客榜 / 好友榜 / 另一路候选池），先原样解析供对照。
+	if v := actTreeGet(raws[66], "f171"); v != nil {
+		var pool []map[string]interface{}
+		for _, it := range actTreeArr(v, "f1") {
+			pool = append(pool, map[string]interface{}{
+				"uid":        actTreeNum(it, "f1", "f1"),
+				"name":       actTreeStr(it, "f1", "f2"),
+				"user_level": actTreeNum(it, "f1", "f4"),
+				"avatar":     actTreeNum(it, "f1", "f3", "f13"),
+				"sign":       actTreeStr(it, "f2"),
+				"raw_f3":     actTreeNum(it, "f3"),
+				"raw_f4":     actTreeNum(it, "f4"),
+				"raw_f5":     actTreeNum(it, "f5"),
+			})
+		}
+		out["friend_pool"] = pool
+	}
+
+	// ---- cmd 63 → f168 语义待定（疑似领取/结算）----
+	// 实测：f168.f1 = { f1:{f1:uid,f2:昵称,f3:{f13:头像},f4:等级},
+	//                   f10:1, f11:270,
+	//                   f12:{f1:3, f2:1, f3:90013, f4:1793068134,
+	//                        f5:932560810177503500, f6:{f1:2000, f2:136}, f7:{…}} }
+	// f12.f6 是成对金额结构，f12.f5 是超大整数（流水号）→ 疑似「领取/结算」凭证。
+	// 语义未实锤，全部字段原样输出，不做业务解释。
+	if v := actTreeGet(raws[63], "f168", "f1"); v != nil {
+		out["cmd63"] = map[string]interface{}{
+			"uid":        actTreeNum(v, "f1", "f1"),
+			"name":       actTreeStr(v, "f1", "f2"),
+			"user_level": actTreeNum(v, "f1", "f4"),
+			"avatar":     actTreeNum(v, "f1", "f3", "f13"),
+			"raw_f10":    actTreeNum(v, "f10"),
+			"raw_f11":    actTreeNum(v, "f11"),
+			"raw_f12":    actTreeGet(v, "f12"), // 完整结构，供判定是否为领取凭证
+		}
 	}
 
 	// ---- cmd 67 → f172 今日统计 ----

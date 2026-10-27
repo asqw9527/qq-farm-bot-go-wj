@@ -1114,7 +1114,8 @@ function mtAttemptLine(t) {
   return line
 }
 
-// 可选配方（cmd 58，仅已解锁）；可选员工（cmd 56 雇佣列表）
+// 可选配方（cmd 58 f163.f1，仅已解锁）；
+// 可选员工 = 雇佣候选池（cmd 56 f161.f4，尚未雇佣的人；在岗员工是 cmd55 f160.f1.f9）
 function mtCraftOptions() {
   return ((milkTea.ov && milkTea.ov.recipes) || []).filter(r => r.unlocked !== false)
 }
@@ -1551,6 +1552,48 @@ onUnmounted(() => { window.removeEventListener('account-switched', onSwitched) }
           </div>
         </div>
 
+        <!-- 雇佣候选池（cmd 56 f161.f4）+ 好友榜（cmd 66 f171） -->
+        <div class="act-card">
+          <div class="act-card-hd"><h4>🧑‍🤝‍🧑 雇佣候选池（{{ (milkTea.ov && milkTea.ov.hire_list || []).length }}）</h4></div>
+          <div class="act-hint" style="margin-top:0">
+            来源 <code>cmd 56 → f161.f4</code>（2026-10-27 修正：此前误取 f161.f1，它是标量 1，导致下拉为空）。
+            这里的人<b>尚未雇佣</b>，与上方「在岗员工」（<code>cmd 55 → f160.f1.f9</code>）是两批人。
+            <template v-if="milkTea.ov && milkTea.ov.hire_meta">
+              服务端标量：已雇数 f1=<b>{{ n(milkTea.ov.hire_meta.raw_f1) }}</b>、f2={{ n(milkTea.ov.hire_meta.raw_f2) }}、f3={{ n(milkTea.ov.hire_meta.raw_f3) }}
+            </template>
+          </div>
+          <div v-for="(h, i) in (milkTea.ov && milkTea.ov.hire_list || [])" :key="'hr'+i" class="act-tier">
+            <span class="lv">👤 {{ h.name || ('uid' + h.uid) }}<em style="font-weight:400;color:#999">Lv.{{ n(h.user_level) }} · uid {{ h.uid }}</em></span>
+            <span class="rw">
+              <em>职位：{{ h.role || '—' }}（id {{ n(h.role_id) }}）</em>
+              <em>状态：{{ n(h.status) }}</em>
+              <em>到期：{{ fmtMilkTeaDate(h.expire_at) }}</em>
+            </span>
+          </div>
+          <div v-if="!(milkTea.ov && milkTea.ov.hire_list || []).length" style="font-size:12px;color:#999">无候选（服务端 f164.f4 为空）</div>
+
+          <template v-if="(milkTea.ov && milkTea.ov.friend_pool || []).length">
+            <div class="act-card-hd" style="margin-top:10px"><h4>🌟 榜单/候选池2（cmd 66 · f171，语义待定）</h4></div>
+            <div v-for="(p, i) in milkTea.ov.friend_pool" :key="'fp'+i" class="act-tier">
+              <span class="lv">👤 {{ p.name || ('uid' + p.uid) }}<em style="font-weight:400;color:#999">Lv.{{ n(p.user_level) }}</em></span>
+              <span class="rw">
+                <em>{{ p.sign || '—' }}</em>
+                <em>f3={{ n(p.raw_f3) }}</em>
+                <em>f4={{ n(p.raw_f4) }}</em>
+                <em>f5={{ n(p.raw_f5) }}</em>
+              </span>
+            </div>
+          </template>
+
+          <template v-if="milkTea.ov && milkTea.ov.cmd63">
+            <div class="act-card-hd" style="margin-top:10px"><h4>❓ cmd 63（f168，疑似领取/结算，语义待定）</h4></div>
+            <div style="font-size:12px;color:#666">
+              {{ milkTea.ov.cmd63.name || '—' }} · Lv.{{ n(milkTea.ov.cmd63.user_level) }} · f10={{ n(milkTea.ov.cmd63.raw_f10) }} · f11={{ n(milkTea.ov.cmd63.raw_f11) }}
+            </div>
+            <pre style="font-size:11px;background:#fafafa;padding:6px;border-radius:6px;overflow:auto;max-height:160px;margin:6px 0 0">{{ JSON.stringify(milkTea.ov.cmd63.raw_f12, null, 1) }}</pre>
+          </template>
+        </div>
+
         <!-- 店铺操作（领取营业值 / 制作奶茶 / 添加员工） -->
         <div class="act-card">
           <div class="act-card-hd">
@@ -1576,7 +1619,7 @@ onUnmounted(() => { window.removeEventListener('account-switched', onSwitched) }
 
             <select v-model="mtAct.uid" style="padding:4px 8px;font-size:12px;border:1px solid #d9d9d9;border-radius:6px;max-width:160px">
               <option value="">选择员工…</option>
-              <option v-for="h in mtHireOptions()" :key="'h'+h.uid" :value="h.uid">{{ h.name || ('uid' + h.uid) }} Lv.{{ n(h.user_level) }}</option>
+              <option v-for="h in mtHireOptions()" :key="'h'+h.uid" :value="h.uid">{{ h.name || ('uid' + h.uid) }} Lv.{{ n(h.user_level) }}{{ h.role ? ' · ' + h.role : '' }}</option>
             </select>
             <button class="act-btn" :class="{ disabled: mtAct.busy }" :disabled="mtAct.busy" @click="mtDoAction('hire')">➕ 添加员工</button>
 
@@ -1584,10 +1627,13 @@ onUnmounted(() => { window.removeEventListener('account-switched', onSwitched) }
           </div>
 
           <div class="act-hint" style="margin-top:6px">
-            ⚠️ 协议状态（2026-10-27 修正）：制作奶茶 <b>cmd 62</b> 能返回业务级中文报错 → 服务端确实受理；
-            但 8 种载荷全回同一句「选择的果实无效」。核对上游 <code>activitypb.proto</code> 后确认：
-            <code>OperateRequest</code> 的扩展字段只有 3/101/102/103/107/112/113/114，<b>不存在 121</b>，
-            上游三个项目也都没实现奶茶 → 继续穷举载荷形态无效，应改用下方「协议扫描」定位真实 ext 字段号。
+            ⚠️ 协议状态（2026-10-27 二次修正）：制作奶茶 <b>cmd 62</b> 能返回业务级中文报错 → 服务端确实受理。
+            但实测 <b>ext 100~130 共 31 个字段号，报错一字不差</b>（全是「选择的果实无效」）——
+            若服务端会解析任一字段，至少应有不同反应，故判定 <b>62 不从请求参数读果实</b>；
+            且上游 <code>activitypb.proto</code> 里 <code>OperateRequest</code> 的扩展字段只有 3/101/102/103/107/112/113/114，
+            <b>不存在 121</b>。下一步扫 <b>ext 1~60</b>（含唯一通用参数位 <code>field 3</code>）。<br>
+            ✅ 已修复：雇佣候选池取 <code>cmd 56 → f161.f4</code>（此前误取标量 f161.f1，导致员工下拉为空）。
+            <b>cmd 57 回「活动参数错误」恰恰说明它就是雇佣操作</b>（收到请求、只缺参数）。
           </div>
 
           <template v-if="mtAct.result && mtAct.result.action !== 'scan'">
