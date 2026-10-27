@@ -119,21 +119,28 @@ fi
 echo "    plugins.json 已启用"
 
 echo "==> [4/6] 第三方插件白名单补丁（若插件商店索引未合入则必需，已打过的自动跳过）"
+# 变量无关：①删掉整条 isOfficialPlugin(...) ? null : 判定 ②把末尾 whitelist 拒绝改成允许(null)
+#   这样非官方插件也可加载，仅保留"敏感词"拦截（官方 README 方式二兜底方案）。
 docker exec "$CONTAINER" node -e '
 const fs=require("fs");const p="/app/napcat/napcat.mjs";
 try{
   let s=fs.readFileSync(p,"utf8");
-  const t="return this.isOfficialPlugin(e) ? null : r ? `sensitive keyword \"${r}\"` : \"not in official plugin whitelist\";";
-  if(s.includes(t)){
-    fs.copyFileSync(p,p+".bak");
-    fs.writeFileSync(p,s.replace(t,"return r ? `sensitive keyword \"${r}\"` : null"));
-    console.log("    白名单已打补丁（备份 napcat.mjs.bak）");
-  }else if(s.includes("not in official plugin whitelist")){
-    console.log("    NapCat 版本不同，未匹配到完整片段；若插件加载报 not in official plugin whitelist，");
-    console.log("    请在 /app/napcat/napcat.mjs 里搜索该字符串，按 qq-code README 去掉 isOfficialPlugin 判定。");
-  }else{
+  if(!s.includes("not in official plugin whitelist")){
     console.log("    无需补丁（官方索引已收录或版本已变化）");
+    process.exit(0);
   }
+  if(!fs.existsSync(p+".bak")) fs.copyFileSync(p,p+".bak");
+  const s2=s
+    .replace(/(\w+\.)?isOfficialPlugin\([^)]*\)\s*\?\s*null\s*:/g,"")
+    .replace(/:\s*"not in official plugin whitelist"/g,": null");
+  if(s2===s){
+    console.log("    !! 已匹配到白名单字符串但无法自动定位判定式，请按 qq-code README 在");
+    console.log("       /app/napcat/napcat.mjs 搜索 not in official plugin whitelist 该行，");
+    console.log("       删除其中的 this.isOfficialPlugin(e) ? null : 部分后手动重启 NapCat。");
+    process.exit(1);
+  }
+  fs.writeFileSync(p,s2);
+  console.log("    白名单已打补丁（去掉 isOfficialPlugin 判定，备份 napcat.mjs.bak）");
 }catch(e){console.log("    补丁跳过: "+e.message)}
 ' || echo "    补丁步骤失败（不阻塞，稍后看插件能否加载）"
 
