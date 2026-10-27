@@ -121,28 +121,38 @@ echo "    plugins.json 已启用"
 echo "==> [4/6] 第三方插件白名单补丁（若插件商店索引未合入则必需，已打过的自动跳过）"
 # 变量无关：①删掉整条 isOfficialPlugin(...) ? null : 判定 ②把末尾 whitelist 拒绝改成允许(null)
 #   这样非官方插件也可加载，仅保留"敏感词"拦截（官方 README 方式二兜底方案）。
-docker exec "$CONTAINER" node -e '
-const fs=require("fs");const p="/app/napcat/napcat.mjs";
-try{
-  let s=fs.readFileSync(p,"utf8");
-  if(!s.includes("not in official plugin whitelist")){
-    console.log("    无需补丁（官方索引已收录或版本已变化）");
-    process.exit(0);
-  }
-  if(!fs.existsSync(p+".bak")) fs.copyFileSync(p,p+".bak");
-  const s2=s
-    .replace(/(\w+\.)?isOfficialPlugin\([^)]*\)\s*\?\s*null\s*:/g,"")
-    .replace(/:\s*"not in official plugin whitelist"/g,": null");
-  if(s2===s){
-    console.log("    !! 已匹配到白名单字符串但无法自动定位判定式，请按 qq-code README 在");
-    console.log("       /app/napcat/napcat.mjs 搜索 not in official plugin whitelist 该行，");
-    console.log("       删除其中的 this.isOfficialPlugin(e) ? null : 部分后手动重启 NapCat。");
-    process.exit(1);
-  }
-  fs.writeFileSync(p,s2);
-  console.log("    白名单已打补丁（去掉 isOfficialPlugin 判定，备份 napcat.mjs.bak）");
-}catch(e){console.log("    补丁跳过: "+e.message)}
-' || echo "    补丁步骤失败（不阻塞，稍后看插件能否加载）"
+# 注意：mlikiowa/napcat-docker 容器内不含 node，故用宿主机 python3 改文件后 docker cp 回容器。
+NP="/app/napcat/napcat.mjs"
+TMP="/tmp/napcat_whitelist_patch.mjs"
+if docker cp "$CONTAINER:$NP" "$TMP" 2>/dev/null; then
+  if python3 - "$TMP" <<'PYEOF'
+import sys, re, os
+p = sys.argv[1]
+s = open(p, encoding='utf-8').read()
+if "not in official plugin whitelist" not in s:
+    print("    无需补丁（官方索引已收录或版本已变化）")
+    sys.exit(0)
+bak = p + ".bak"
+if not os.path.exists(bak):
+    open(bak, 'w', encoding='utf-8').write(s)
+s2 = re.sub(r'(\w+\.)?isOfficialPlugin\([^)]*\)\s*\?\s*null\s*:', '', s)
+s2 = re.sub(r':\s*"not in official plugin whitelist"', ': null', s2)
+if s2 == s:
+    print("    !! 无法自动定位判定式，请按 qq-code README 在 napcat.mjs 搜索该行手动改。")
+    sys.exit(1)
+open(p, 'w', encoding='utf-8').write(s2)
+print("    白名单已打补丁（去掉 isOfficialPlugin 判定，备份 napcat.mjs.bak）")
+PYEOF
+  then
+    docker cp "$TMP" "$CONTAINER:$NP" 2>/dev/null && docker cp "$TMP.bak" "$CONTAINER:$NP.bak" 2>/dev/null || true
+    echo "    已写回容器，[5/6] 重启即生效"
+  else
+    echo "    补丁未应用（见上）"
+  fi
+else
+  echo "    !! 无法读取 $NP（容器路径可能不同，请 docker exec $CONTAINER 检查实际位置）"
+fi
+rm -f "$TMP" "$TMP.bak"
 
 echo "==> [5/6] 重启生效"
 $COMPOSE restart >/dev/null 2>&1 || docker restart "$CONTAINER" >/dev/null
