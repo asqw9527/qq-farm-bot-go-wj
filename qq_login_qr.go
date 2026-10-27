@@ -403,6 +403,32 @@ func handleQQQrStart(w http.ResponseWriter, r *http.Request) {
 			}})
 			return
 		}
+		// NapCat 上的 QQ 已登录 → WebUI 不再出登录二维码。此时本应走
+		// 「插件直接取 code 免扫码」路径，说明第 1 步插件取码失败——
+		// 重试一次；仍失败则把插件真实错误暴露出来引导排查。
+		if strings.Contains(strings.ToLower(gerr.Error()), "logined") || strings.Contains(gerr.Error(), "已登录") {
+			code2, uin2, err2 := fetchQQFarmCodeTimeout(c.Base, c.Key, c.AppID, c.Ver, c.PluginPath, 15*time.Second)
+			if err2 == nil {
+				accID, aerr := createQQAccountAndConnect(u.Username, name, c, code2, uin2)
+				if aerr != nil {
+					writeError(w, errCode(aerr), aerr.Error())
+					return
+				}
+				writeJSON(w, map[string]interface{}{"ok": true, "data": map[string]interface{}{
+					"state": "success", "uin": uin2, "activeAccountId": accID,
+				}})
+				return
+			}
+			writeJSON(w, map[string]interface{}{"ok": true, "data": map[string]interface{}{
+				"state": "error", "needConfig": false,
+				"error": "NapCat 已登录 QQ（无需扫码），但取农场 code 失败",
+				"hint": "NapCat 上的 QQ 已登录，本应免扫码直接登录，但 qq-code 插件取农场 code 失败：" + err2.Error() +
+					"。排查：① `docker logs napcat-farm 2>&1 | grep -i plugin` 看插件是否加载（若报 not in official plugin whitelist，重跑 bash deploy/napcat/setup.sh 打白名单补丁）；" +
+					"② 面板「插件 Key」需与插件 data/config.json 的 key 一致（默认可留空）；" +
+					"③ 重跑 bash deploy/napcat/setup.sh 会重装插件并重启 NapCat。修好后回到本页点「生成二维码」即可（会自动免扫码登录）。",
+			}})
+			return
+		}
 		writeJSON(w, map[string]interface{}{"ok": true, "data": map[string]interface{}{
 			"state": "error", "error": gerr.Error(), "needConfig": true,
 		}})

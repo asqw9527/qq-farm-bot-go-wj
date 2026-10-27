@@ -414,7 +414,7 @@ async function qqStartQr() {
     if (d.state === 'success') { await _qqFinish(d); return }
     if (d.state === 'error') {
       qqState.value = d.needConfig ? 'need_config' : 'error'
-      qqMsg.value = d.error || '未知错误'
+      qqMsg.value = d.hint || d.error || '未知错误'
       return
     }
     if (d.state === 'qr') {
