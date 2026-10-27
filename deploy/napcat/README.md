@@ -12,10 +12,15 @@ bash setup.sh            # 不传参则自动生成随机 WebUI Token
 # 或指定 token： bash setup.sh my-token-123
 ```
 
-脚本做的事：启动 `mlikiowa/napcat-docker` 容器（WebUI 仅绑定 127.0.0.1:6099）→
-从 [fubiwangluo/qq-code](https://github.com/fubiwangluo/qq-code) Releases 下载
-`napcat-plugin-qq-farm-code` 插件放入 `plugins/` 并启用 → 按需给第三方插件白名单
-打补丁 → 重启生效并打印 Token。
+脚本做的事：
+1. **自动安装 Docker**（若服务器未装，使用阿里云镜像 `get.docker.com --mirror Aliyun`，
+   支持 CentOS/Anolis/Ubuntu/Debian；仅支持 **x86_64**，ARM 机器无法运行 QQ NT）。
+2. 启动 `mlikiowa/napcat-docker` 容器（WebUI 仅绑定 127.0.0.1:6099）→
+   从 [fubiwangluo/qq-code](https://github.com/fubiwangluo/qq-code) Releases 下载
+   `napcat-plugin-qq-farm-code` 插件放入 `plugins/` 并启用 → 按需给第三方插件白名单
+   打补丁 → 重启生效并打印 Token。
+
+> 若你已手动装好 Docker，脚本会跳过安装步骤直接部署。
 
 ## 部署后：面板扫码
 
@@ -55,3 +60,18 @@ Environment=NAPCAT_WEBUI_TOKEN=<setup.sh 打印的 token>
   存在且 `config/plugins.json` 已启用；看容器日志 `docker logs napcat-farm`。
 - **安全**：WebUI 端口只绑定 127.0.0.1；若需远程访问 NapCat，请走反代 + 鉴权，
   勿裸暴露 6099（能访问者可代取该 QQ 的 code）。
+
+## 原生安装（不使用 Docker，备选）
+
+若不想装 Docker，NapCat 官方提供 Shell 安装（自动附带 QQ）。注意：**官方 Shell
+安装仅支持 Ubuntu 20+/Debian 10+，CentOS 系仅支持 9**（旧版 CentOS 7/Anolis 不支持，
+会失败）。命令：
+
+```bash
+curl -o napcat.sh https://nclatest.znin.net/NapNeko/NapCat-Installer/main/script/install.sh \
+  && sudo bash napcat.sh --docker n --cli y
+```
+
+安装后需自行配置 WebUI（端口 6099、绑定 127.0.0.1、设 Token）并把
+`napcat-plugin-qq-farm-code` 插件放入 `plugins/` 目录、在 `plugins.json` 启用。
+推荐优先用上面的 Docker 一键脚本，兼容性最好。
