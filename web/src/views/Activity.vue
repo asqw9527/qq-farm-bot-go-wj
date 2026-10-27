@@ -969,10 +969,10 @@ async function claimSeason() {
 //   累计营业额      cmd55 → f160.f1.f2   （与 f121.f5 同源）
 //   升级所需营业额   cmd55 → f160.f1.f3
 //   本级起始营业额   cmd55 → f160.f1.f4
-//   今日售出（杯）   cmd67 → f172.f4 / 10 （定点一位小数；实测 1419→141.9 杯）
-//   营业速度(杯/时)  cmd67 → (f172.f4/10) ÷ 当日已过小时（实测 7.99 ≈ 游戏内 8 杯/小时）
+//   今日售出（杯）   cmd67 → f172.f4 原值即杯数（2026-10-27 实锤 f4=1163 ↔ 游戏内 1163 杯；此前 ÷10 标定为误判）
+//   营业速度(杯/时)  cmd67 → f172.f4 ÷ 当日已过小时
 //   今日0点时间戳    cmd67 → f172.f1
-//   今日按配方分布   cmd67 → f172.f5  [{配方id, 杯数}]（杯数同 ×0.1）
+//   今日按配方分布   cmd67 → f172.f5  [{配方id, 杯数}]（杯数为原值）
 //   今日按品质分布   cmd67 → f172.f6  [{品质, 杯数}]（0=普通 1=优质 2=精品）
 //   员工班次/收益    cmd67 → f172.f7  [{姓名, 职位, paid, pending}]  f10={f1:已付, f2:累计}
 //   在岗员工/合同    cmd55 → f160.f1.f9 [{name, role, wage, hired_at, expire_at}]
@@ -1017,11 +1017,12 @@ async function loadMilkTea() {
 }
 
 function fmtRevenue(v) {
+  // 实际数字显示（不做万单位换算），千位分隔便于阅读
   const x = Number(v) || 0
-  return x >= 10000 ? (x / 10000).toFixed(1) + ' 万' : String(x)
+  return x.toLocaleString('zh-CN')
 }
 
-// 杯数：后端已做 ÷10（定点一位小数），整数直接显示，带小数保留 1 位
+// 杯数：后端直接给原值（f4 即杯数），整数直接显示，带小数保留 1 位
 function fmtCups(v) {
   const x = Number(v) || 0
   return Number.isInteger(x) ? String(x) : x.toFixed(1)

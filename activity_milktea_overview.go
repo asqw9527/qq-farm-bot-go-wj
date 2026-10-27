@@ -302,18 +302,19 @@ func handleMilkTeaOverview(w http.ResponseWriter, r *http.Request) {
 
 	// ---- cmd 67 → f172 今日统计 ----
 	if t := actTreeGet(raws[67], "f172"); t != nil {
-		// f4 定点一位小数（实锤：2026-10-23 f4=1419 → 141.9 杯，÷当日已过 17.765h = 7.99 ≈ 游戏内「8 杯/小时」）
+		// f4 即杯数（2026-10-27 实锤：f4=1163 ↔ 游戏内「今日售出 1163 杯」；
+		// 此前 ÷10 定点一位小数的标定为误判，已回退）
 		cupsRaw := actTreeNum(t, "f4")
 		today := map[string]interface{}{
 			"day_start":    actTreeNum(t, "f1"), // 今日 0 点时间戳
 			"raw_f2":       actTreeNum(t, "f2"),
 			"raw_f3":       actTreeNum(t, "f3"),
 			"cups_raw":     cupsRaw,
-			"cups":         float64(cupsRaw) / 10, // 今日售出杯数
+			"cups":         float64(cupsRaw), // 今日售出杯数（f4 原值即杯数）
 			"server_time":  actTreeNum(raws[79], "f179", "f1"),
 			"raw_from_cmd": actTreeNum(t, "f4"),
 		}
-		// 营业速度：今日售出 ÷ 今日已过小时（实锤与游戏内「X 杯每小时」一致）
+		// 营业速度：今日售出 ÷ 今日已过小时
 		if dayStart := actTreeNum(t, "f1"); dayStart > 0 {
 			nowUnix := actTreeNum(raws[79], "f179", "f1")
 			if nowUnix <= 0 {
@@ -321,15 +322,15 @@ func handleMilkTeaOverview(w http.ResponseWriter, r *http.Request) {
 			}
 			if hours := float64(nowUnix-dayStart) / 3600; hours > 0.1 {
 				today["hours_elapsed"] = float64(int(hours*100)) / 100
-				today["speed_per_hour"] = float64(int(float64(cupsRaw)/10/hours*10)) / 10
+				today["speed_per_hour"] = float64(int(float64(cupsRaw)/hours*10)) / 10
 			}
 		}
 		var byRecipe, byQuality []map[string]interface{}
 		for _, it := range actTreeArr(t, "f5") {
-			byRecipe = append(byRecipe, map[string]interface{}{"recipe_id": actTreeNum(it, "f1"), "cups": float64(actTreeNum(it, "f2")) / 10})
+			byRecipe = append(byRecipe, map[string]interface{}{"recipe_id": actTreeNum(it, "f1"), "cups": float64(actTreeNum(it, "f2"))})
 		}
 		for _, it := range actTreeArr(t, "f6") {
-			byQuality = append(byQuality, map[string]interface{}{"quality": actTreeNum(it, "f1"), "cups": float64(actTreeNum(it, "f2")) / 10})
+			byQuality = append(byQuality, map[string]interface{}{"quality": actTreeNum(it, "f1"), "cups": float64(actTreeNum(it, "f2"))})
 		}
 		today["by_recipe"], today["by_quality"] = byRecipe, byQuality
 		// 员工班次 f7：含今日收益 f10={f1:已付, f2:累计/待领}
