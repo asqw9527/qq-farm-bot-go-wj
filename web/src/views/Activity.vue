@@ -1016,6 +1016,58 @@ async function loadMilkTea() {
   await loadMilkTeaOverview()
 }
 
+/* ---------- 奶茶店铺操作（领取营业值 / 制作奶茶 / 添加员工） ---------- */
+// 协议尚未全部实锤：服务端会返回业务原文，这里逐候选尝试并原样回显，便于继续收敛。
+const mtAct = reactive({ busy: false, recipeId: '', uid: '', result: null })
+
+function mtActLabel(a) {
+  return ({ craft: '制作奶茶', claim: '领取营业值', hire: '添加员工' })[a] || a
+}
+
+async function mtDoAction(action) {
+  const a = acc(); if (!a) return
+  if (mtAct.busy) return
+  const label = mtActLabel(action)
+  // 制作奶茶必须指定配方（cmd 58 配方表）
+  if (action === 'craft' && !mtAct.recipeId) {
+    app.error('请先选择一个配方再制作'); return
+  }
+  if (action === 'hire' && !mtAct.uid) {
+    app.error('请先选择一个员工'); return
+  }
+  mtAct.busy = true; mtAct.result = null
+  try {
+    const payload = { accountId: a, action }
+    if (action === 'craft') payload.recipeId = Number(mtAct.recipeId) || 0
+    if (action === 'hire') payload.uid = Number(mtAct.uid) || 0
+    const { data } = await api.post('/api/activity/milktea/action', payload, { timeout: 180000 })
+    mtAct.result = data
+    if (data && data.done) {
+      app.success(label + '成功')
+      await loadMilkTeaOverview()
+    } else {
+      app.error(label + '未成功，见下方尝试明细')
+    }
+  } catch (e) {
+    app.error(label + '失败: ' + (e.response?.data?.error || e.message || '未知'))
+  } finally { mtAct.busy = false }
+}
+
+function mtAttemptLine(t) {
+  const parts = ['cmd ' + t.cmd]
+  if (t.ext_field) parts.push('ext#' + t.ext_field + (t.ext_hex ? '(' + t.ext_hex + ')' : ' 空'))
+  if (t.desc) parts.push(t.desc)
+  return parts.join(' · ') + ' → ' + (t.ok ? '✅ 成功（服务端无错返回）' : (t.error || '无返回'))
+}
+
+// 可选配方（cmd 58，仅已解锁）；可选员工（cmd 56 雇佣列表）
+function mtCraftOptions() {
+  return ((milkTea.ov && milkTea.ov.recipes) || []).filter(r => r.unlocked !== false)
+}
+function mtHireOptions() {
+  return (milkTea.ov && milkTea.ov.hire_list) || []
+}
+
 function fmtRevenue(v) {
   // 实际数字显示（不做万单位换算），千位分隔便于阅读
   const x = Number(v) || 0
@@ -1340,11 +1392,27 @@ onUnmounted(() => { window.removeEventListener('account-switched', onSwitched) }
           </div>
 
           <template v-if="milkTea.ov">
-            <div class="act-stats">
-              <span>店铺等级 <b>Lv.{{ n(milkTea.ov.shop && milkTea.ov.shop.level) }}</b><em>店铺成长等级</em></span>
-              <span>累计营业额 <b>{{ fmtRevenue(milkTea.ov.shop && milkTea.ov.shop.revenue) }}</b><em>金币营业额</em></span>
-              <span>今日售出 <b>{{ fmtCups(milkTea.ov.today && milkTea.ov.today.cups) }} 杯</b><em>今日销售杯数</em></span>
-              <span>营业速度 <b>{{ milkTea.ov.today && milkTea.ov.today.speed_per_hour != null ? milkTea.ov.today.speed_per_hour + ' 杯/小时' : '—' }}</b><em>自动积累中</em></span>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));gap:10px;margin:10px 0">
+              <div style="padding:10px 12px;border-radius:10px;border:1px solid #ffe0b2;background:linear-gradient(135deg,#fff8ee,#ffe9cf)">
+                <div style="font-size:11px;color:#a2611a">🏪 店铺等级</div>
+                <div style="font-size:19px;font-weight:800;color:#b45309;line-height:1.25">Lv.{{ n(milkTea.ov.shop && milkTea.ov.shop.level) }}</div>
+                <div style="font-size:11px;color:#c08a4f">店铺成长等级</div>
+              </div>
+              <div style="padding:10px 12px;border-radius:10px;border:1px solid #ffe0b2;background:linear-gradient(135deg,#fff8ee,#ffe9cf)">
+                <div style="font-size:11px;color:#a2611a">💰 累计营业额</div>
+                <div style="font-size:19px;font-weight:800;color:#b45309;line-height:1.25">{{ fmtRevenue(milkTea.ov.shop && milkTea.ov.shop.revenue) }}</div>
+                <div style="font-size:11px;color:#c08a4f">金币营业额</div>
+              </div>
+              <div style="padding:10px 12px;border-radius:10px;border:1px solid #d7e6ff;background:linear-gradient(135deg,#f4f9ff,#e3eeff)">
+                <div style="font-size:11px;color:#3b6ea5">🧋 今日售出</div>
+                <div style="font-size:19px;font-weight:800;color:#2b5fa8;line-height:1.25">{{ fmtCups(milkTea.ov.today && milkTea.ov.today.cups) }} <span style="font-size:12px;font-weight:600">杯</span></div>
+                <div style="font-size:11px;color:#6f93c4">今日销售杯数</div>
+              </div>
+              <div style="padding:10px 12px;border-radius:10px;border:1px solid #d7efd9;background:linear-gradient(135deg,#f5fdf6,#e2f6e6)">
+                <div style="font-size:11px;color:#3f7a4c">⚡ 营业速度</div>
+                <div style="font-size:19px;font-weight:800;color:#2f7a41;line-height:1.25">{{ milkTea.ov.today && milkTea.ov.today.speed_per_hour != null ? milkTea.ov.today.speed_per_hour : '—' }} <span style="font-size:12px;font-weight:600">杯/小时</span></div>
+                <div style="font-size:11px;color:#6f9d78">自动积累中</div>
+              </div>
             </div>
 
             <!-- 店铺 + 升级进度 -->
@@ -1362,7 +1430,7 @@ onUnmounted(() => { window.removeEventListener('account-switched', onSwitched) }
 
             <!-- 今日明细 -->
             <div v-if="milkTea.ov.today" style="margin-top:10px">
-              <div style="font-size:12px;color:#666;margin-bottom:4px">今日售出明细（总 {{ fmtCups(milkTea.ov.today.cups) }} 杯 · 原始值 f172.f4={{ n(milkTea.ov.today.cups_raw) }}）</div>
+              <div style="font-size:12px;color:#666;margin-bottom:4px">今日售出明细（总 {{ fmtCups(milkTea.ov.today.cups) }} 杯）</div>
               <div style="display:flex;flex-wrap:wrap;gap:6px">
                 <span v-for="(r, i) in (milkTea.ov.today.by_recipe || [])" :key="'r'+i" class="act-badge">{{ mtRecipeName(r.recipe_id) }} {{ fmtCups(r.cups) }} 杯</span>
                 <span v-for="(q, i) in (milkTea.ov.today.by_quality || [])" :key="'q'+i" class="act-badge" style="background:#eef6ff;color:#3a7">{{ mtQualityName(q.quality) }} {{ fmtCups(q.cups) }} 杯</span>
@@ -1393,7 +1461,7 @@ onUnmounted(() => { window.removeEventListener('account-switched', onSwitched) }
 
             <!-- 配方表 -->
             <div v-if="(milkTea.ov.recipes || []).length" style="margin-top:10px">
-              <div style="font-size:12px;color:#666;margin-bottom:4px">配方表（cmd 58）· <code style="font-size:11px">id / 名称 / 累计销量</code>　<span style="color:#bbb">f5/f6 含义待对照：f5={{ (milkTea.ov.recipes || []).map(r => r.raw_f5).join(',') }} f6={{ [...new Set((milkTea.ov.recipes || []).map(r => r.raw_f6))].join(',') }}</span></div>
+              <div style="font-size:12px;color:#666;margin-bottom:4px">配方表（cmd 58）· <code style="font-size:11px">id / 名称 / 累计销量</code></div>
               <div style="display:flex;flex-wrap:wrap;gap:6px">
                 <span v-for="r in milkTea.ov.recipes" :key="'p'+r.id" class="act-badge" :style="r.unlocked ? '' : 'background:#f5f5f5;color:#aaa'">
                   {{ r.name }} <code style="font-size:10px">#{{ r.id }}</code> · {{ n(r.total_sold) }} 杯{{ r.unlocked ? '' : ' · 未解锁' }}
@@ -1401,7 +1469,7 @@ onUnmounted(() => { window.removeEventListener('account-switched', onSwitched) }
               </div>
             </div>
 
-            <div class="act-hint" style="margin-top:8px">字段均已实锤：等级 f160.f1.f1 / 营业额 f160.f1.f2 / 今日售出 f172.f4÷10 / 速度=今日售出÷已过小时。小贴士：收银台满载时会暂停营业，领取收益后继续营业；奶茶券可用于兑换和企鹅。</div>
+            <div class="act-hint" style="margin-top:8px">数据来源已实锤：等级 f160.f1.f1 / 营业额 f160.f1.f2 / 今日售出 f172.f4 / 速度=今日售出÷今日已过小时。小贴士：收银台满载时会暂停营业，领取收益后继续营业；奶茶券可用于兑换。</div>
             <details style="margin-top:6px">
               <summary style="cursor:pointer;font-size:12px;color:#666">原始字段速查（未映射字段对照游戏内数值用）</summary>
               <pre style="max-height:220px;overflow:auto;font-size:11px;white-space:pre-wrap;word-break:break-all;margin:8px 0 0;border:1px solid #eee;border-radius:6px;padding:8px;background:#fafafa">{{ mtRawDump() }}</pre>
@@ -1423,9 +1491,46 @@ onUnmounted(() => { window.removeEventListener('account-switched', onSwitched) }
           </div>
         </div>
 
-        <!-- 操作 -->
-        <div class="act-actions">
-          <button class="act-btn" style="padding:4px 14px;font-size:13px" @click="loadMilkTea">刷新数据</button>
+        <!-- 店铺操作（领取营业值 / 制作奶茶 / 添加员工） -->
+        <div class="act-card">
+          <div class="act-card-hd">
+            <h4>🎮 店铺操作</h4>
+            <button class="act-btn" style="padding:2px 10px;font-size:12px" :disabled="mtAct.busy || milkTea.busy" @click="loadMilkTeaOverview">刷新数据</button>
+          </div>
+
+          <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+            <button class="act-btn" :class="{ disabled: mtAct.busy }" :disabled="mtAct.busy" @click="mtDoAction('claim')">💰 领取店铺营业值</button>
+
+            <select v-model="mtAct.recipeId" style="padding:4px 8px;font-size:12px;border:1px solid #d9d9d9;border-radius:6px;max-width:160px">
+              <option value="">选择配方…</option>
+              <option v-for="r in mtCraftOptions()" :key="'opt'+r.id" :value="r.id">{{ r.name }} #{{ r.id }}</option>
+            </select>
+            <button class="act-btn" :class="{ disabled: mtAct.busy }" :disabled="mtAct.busy" @click="mtDoAction('craft')">🧋 制作奶茶</button>
+
+            <select v-model="mtAct.uid" style="padding:4px 8px;font-size:12px;border:1px solid #d9d9d9;border-radius:6px;max-width:160px">
+              <option value="">选择员工…</option>
+              <option v-for="h in mtHireOptions()" :key="'h'+h.uid" :value="h.uid">{{ h.name || ('uid' + h.uid) }} Lv.{{ n(h.user_level) }}</option>
+            </select>
+            <button class="act-btn" :class="{ disabled: mtAct.busy }" :disabled="mtAct.busy" @click="mtDoAction('hire')">➕ 添加员工</button>
+
+            <span v-if="mtAct.busy" style="font-size:12px;color:#888">执行中…（逐个候选尝试，请稍候）</span>
+          </div>
+
+          <div class="act-hint" style="margin-top:6px">
+            ⚠️ 协议状态：制作奶茶 <b>cmd 62</b> 已实锤（ext 字段 121 会被引擎消费），但载荷编码未解出；
+            领取营业值与添加员工 <b>cmd 尚未实锤</b>。点击后会按候选组合真实发送，并把服务端返回原样列在下方，便于逐步收敛。
+          </div>
+
+          <template v-if="mtAct.result">
+            <div style="margin-top:8px;font-size:12px">
+              <b>{{ mtAct.result.done ? '✅ 操作成功' : '❌ 未命中（服务端返回如下）' }}</b>
+              <span style="color:#888"> · 节点 {{ mtAct.result.shop_id }} · 共 {{ (mtAct.result.attempts || []).length }} 次尝试</span>
+            </div>
+            <ul style="margin:6px 0 0;padding-left:18px;font-size:12px;line-height:1.7">
+              <li v-for="(t, i) in (mtAct.result.attempts || [])" :key="'at'+i" :style="t.ok ? 'color:#2f7a41' : (t.accepted ? 'color:#b45309' : 'color:#999')">{{ mtAttemptLine(t) }}</li>
+            </ul>
+            <div v-if="mtAct.result.note" class="act-hint" style="margin-top:6px">{{ mtAct.result.note }}</div>
+          </template>
         </div>
 
         <!-- 协议诊断 -->

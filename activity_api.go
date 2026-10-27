@@ -65,6 +65,8 @@ func registerActivityAPI(api *http.ServeMux) {
 	api.HandleFunc("/api/activity/milktea/probe", handleMilkTeaProbe)
 	// 店铺「今日经营概览」真实数据：cmd 55/56/58/59/67/79（已实锤），自动定位店铺节点
 	api.HandleFunc("/api/activity/milktea/overview", handleMilkTeaOverview)
+	// 店铺操作：领取营业值 / 制作奶茶 / 添加员工（未实锤协议按候选尝试并回显服务端原文）
+	api.HandleFunc("/api/activity/milktea/action", handleMilkTeaAction)
 
 	// 公益小红花（CharityRedFlower）：送出爱心值/送出公益金（cmd 已抓包确认）+ 领取奖励（cmd 推断，?cmd 覆盖）
 	api.HandleFunc("/api/activity/honghua", handleHonghuaStatus)
