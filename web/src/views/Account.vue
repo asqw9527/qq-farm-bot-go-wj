@@ -405,7 +405,12 @@ async function qqStartQr() {
     if (seq !== qqSeq) return
     if (!(data?.ok && data?.data)) { qqState.value = 'error'; qqMsg.value = data?.error || '启动失败'; return }
     const d = data.data
-    if (d.state === 'need_config') { qqState.value = 'need_config'; loadQQConfig(); return }
+    if (d.state === 'need_config') {
+      qqState.value = 'need_config'; loadQQConfig()
+      if (!qqNapcatBase.value.trim() && d.triedBase) qqNapcatBase.value = d.triedBase
+      qqMsg.value = d.hint || d.error || ''
+      return
+    }
     if (d.state === 'success') { await _qqFinish(d); return }
     if (d.state === 'error') {
       qqState.value = d.needConfig ? 'need_config' : 'error'
@@ -624,7 +629,9 @@ onUnmounted(() => { stopQr(); stopQqQr(); window.removeEventListener('account-sw
         <template v-if="qqState==='need_config' || qqState==='error'">
           <div style="width:100%;max-width:340px;display:flex;flex-direction:column;gap:8px">
             <p style="font-size:12px;color:var(--muted);text-align:center;line-height:1.6;margin:0">
-              需要一台已部署 <b>NapCat</b> 的设备（手机 QQ 扫码后在 NapCat 上授权登录），并安装启用 <b>napcat-plugin-qq-farm-code</b> 插件。
+              QQ 二维码由 <b>NapCat</b> 生成（手机 QQ 扫码授权登录后，自动签出农场 code）。<br>
+              推荐<b>与本项目同机部署</b>（无需额外设备）：在服务器上执行仓库自带的一键脚本
+              <code>deploy/napcat/setup.sh</code>，完成后直接点「生成二维码」即可。
             </p>
             <input v-model="qqNapcatBase" class="field" placeholder="NapCat 地址，如 http://127.0.0.1:6099">
             <input v-model="qqWebuiToken" class="field" placeholder="WebUI Token（NapCat webui.json 里的 token）" type="password" autocomplete="off">

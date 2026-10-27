@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -204,7 +205,11 @@ func refreshCodeFromNapcat(acc *models.Account) (string, error) {
 	if pp == "" {
 		pp = "napcat-plugin-qq-farm-code"
 	}
-	code, _, err := fetchQQFarmCode(q.NapcatBase, q.NapcatKey, q.AppID, q.Ver, pp)
+	base := q.NapcatBase
+	if strings.TrimSpace(base) == "" {
+		base = defaultNapcatBase()
+	}
+	code, _, err := fetchQQFarmCode(base, q.NapcatKey, q.AppID, q.Ver, pp)
 	return code, err
 }
 

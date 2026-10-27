@@ -357,16 +357,10 @@ func handleQQQrStart(w http.ResponseWriter, r *http.Request) {
 	}
 	var body map[string]interface{}
 	json.NewDecoder(r.Body).Decode(&body)
-	c := resolveQQCreds(body)
+	c := napcatEnvCreds(resolveQQCreds(body))
 	name, _ := body["name"].(string)
 
 	pruneQQQrSessions()
-
-	// 未配置 NapCat：让前端弹配置表单
-	if c.Base == "" {
-		writeJSON(w, map[string]interface{}{"ok": true, "data": map[string]interface{}{"state": "need_config"}})
-		return
-	}
 
 	// 1) NapCat 已登录？插件直接取 code 成功即免扫码
 	code, uin, err := fetchQQFarmCodeTimeout(c.Base, c.Key, c.AppID, c.Ver, c.PluginPath, 8*time.Second)
@@ -385,6 +379,14 @@ func handleQQQrStart(w http.ResponseWriter, r *http.Request) {
 	// 2) NapCat 未登录 → WebUI 鉴权 + 取二维码
 	cred, aerr := napcatWebuiLogin(c)
 	if aerr != nil {
+		// 插件取码与 WebUI 都连不上 → 视为没有可用的 NapCat，引导配置
+		if isNapcatConnErr(aerr) && isNapcatConnErr(err) {
+			writeJSON(w, map[string]interface{}{"ok": true, "data": map[string]interface{}{
+				"state": "need_config", "triedBase": c.Base,
+				"hint": "未在 " + c.Base + " 检测到可用的 NapCat（手机 QQ 扫码需经 NapCat 出二维码）。可在本机一键部署：仓库 deploy/napcat/setup.sh；或填写远程 NapCat 地址。",
+			}})
+			return
+		}
 		writeJSON(w, map[string]interface{}{"ok": true, "data": map[string]interface{}{
 			"state": "error", "error": aerr.Error(), "needConfig": true,
 			"hint": "手机 QQ 扫码需要通过 NapCat WebUI 获取二维码，请填写 WebUI Token",
@@ -393,6 +395,13 @@ func handleQQQrStart(w http.ResponseWriter, r *http.Request) {
 	}
 	qrUrl, gerr := napcatGetQrUrl(c.Base, cred)
 	if gerr != nil {
+		if isNapcatConnErr(gerr) && isNapcatConnErr(err) {
+			writeJSON(w, map[string]interface{}{"ok": true, "data": map[string]interface{}{
+				"state": "need_config", "triedBase": c.Base,
+				"hint": "未在 " + c.Base + " 检测到可用的 NapCat，请部署后重试或填写远程 NapCat 地址。",
+			}})
+			return
+		}
 		writeJSON(w, map[string]interface{}{"ok": true, "data": map[string]interface{}{
 			"state": "error", "error": gerr.Error(), "needConfig": true,
 		}})

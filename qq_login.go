@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -74,6 +75,48 @@ func resolveQQCreds(body map[string]interface{}) qqCreds {
 		c.PluginPath = "napcat-plugin-qq-farm-code"
 	}
 	return c
+}
+
+// defaultNapcatBase 默认 NapCat 地址：环境变量 NAPCAT_BASE 优先，否则本机 6099。
+// 用途：面板 QQ 扫码零配置——只要 Bot 同机跑着一个 NapCat（deploy/napcat/setup.sh），
+// 不填任何表单也能直接出二维码。
+func defaultNapcatBase() string {
+	if v := strings.TrimSpace(os.Getenv("NAPCAT_BASE")); v != "" {
+		return v
+	}
+	return "http://127.0.0.1:6099"
+}
+
+// napcatEnvCreds 给凭据补默认值：Base 为空 → defaultNapcatBase()；
+// WebUI Token / 插件 Key 为空 → 环境变量 NAPCAT_WEBUI_TOKEN / NAPCAT_PLUGIN_KEY。
+func napcatEnvCreds(c qqCreds) qqCreds {
+	if strings.TrimSpace(c.Base) == "" {
+		c.Base = defaultNapcatBase()
+	}
+	if c.WebUIToken == "" {
+		c.WebUIToken = strings.TrimSpace(os.Getenv("NAPCAT_WEBUI_TOKEN"))
+	}
+	if c.Key == "" {
+		c.Key = strings.TrimSpace(os.Getenv("NAPCAT_PLUGIN_KEY"))
+	}
+	return c
+}
+
+// isNapcatConnErr 判断是否为「连不上 NapCat」类错误（区别于 token 错误/接口错误）。
+func isNapcatConnErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(err.Error())
+	for _, kw := range []string{
+		"请求 napcat 失败", "连接 napcat 失败", "连接 napcat 失败",
+		"connection refused", "no such host", "i/o timeout", "connect:", "dial tcp",
+	} {
+		if strings.Contains(s, kw) {
+			return true
+		}
+	}
+	return false
 }
 
 // fetchQQFarmCode 调 NapCat 插件 /proto/code 取 QQ 农场登录 code。
@@ -154,7 +197,7 @@ func handleQQFetchCode(w http.ResponseWriter, r *http.Request) {
 	}
 	var body map[string]interface{}
 	json.NewDecoder(r.Body).Decode(&body)
-	c := resolveQQCreds(body)
+	c := napcatEnvCreds(resolveQQCreds(body))
 	code, uin, err := fetchQQFarmCode(c.Base, c.Key, c.AppID, c.Ver, c.PluginPath)
 	if err != nil {
 		writeError(w, 400, err.Error())
@@ -229,7 +272,7 @@ func handleQQLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	var body map[string]interface{}
 	json.NewDecoder(r.Body).Decode(&body)
-	c := resolveQQCreds(body)
+	c := napcatEnvCreds(resolveQQCreds(body))
 	code, uin, err := fetchQQFarmCode(c.Base, c.Key, c.AppID, c.Ver, c.PluginPath)
 	if err != nil {
 		writeError(w, 400, err.Error())

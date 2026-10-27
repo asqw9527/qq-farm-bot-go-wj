@@ -1,0 +1,18 @@
+services:
+  napcat:
+    image: mlikiowa/napcat-docker:latest
+    container_name: napcat-farm
+    restart: unless-stopped
+    environment:
+      - NAPCAT_UID=${NAPCAT_UID:-1000}
+      - NAPCAT_GID=${NAPCAT_GID:-1000}
+      # WebUI Token：既是浏览器进 WebUI 的密码，也是本 BOT 面板扫码要填的 WebUI Token
+      - WEBUI_TOKEN=${WEBUI_TOKEN:?请先 export WEBUI_TOKEN=一个随机串（setup.sh 会自动生成）}
+      - TZ=Asia/Shanghai
+    ports:
+      # 只绑定本机回环：BOT 与 NapCat 同机时用 http://127.0.0.1:6099 即可，不暴露公网
+      - "127.0.0.1:6099:6099"
+    volumes:
+      - ./config:/app/napcat/config      # NapCat 配置（含 webui.json、plugins.json）
+      - ./QQ:/app/.config/QQ             # QQ 登录态（持久化，重启免重扫）
+      - ./plugins:/app/napcat/plugins    # 第三方插件目录（qq-farm-code 装这里）
