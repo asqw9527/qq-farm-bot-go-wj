@@ -353,20 +353,48 @@ func mtScanPayload(form string, id, count int64) []byte {
 	return mtExtNested(1, [2]int64{1, id}, [2]int64{2, count})
 }
 
-// mtParseCmdList 解析 "62" / "55,57,61,62" 形式的 cmd 列表；空则用 baseCmd
+// mtParseCmdList 解析 cmd 列表，支持三种写法：
+//
+//	"62"          单个
+//	"55,57,61,62" 逗号列表
+//	"50-90"       范围（也接受 50~90）
+//
+// 结果去重升序；解析不出任何值则回落到 baseCmd。
 func mtParseCmdList(s string, baseCmd int64) []int64 {
 	var out []int64
+	seen := map[int64]bool{}
+	push := func(v int64) {
+		if v > 0 && !seen[v] {
+			seen[v] = true
+			out = append(out, v)
+		}
+	}
 	for _, p := range strings.Split(s, ",") {
 		p = strings.TrimSpace(p)
 		if p == "" {
 			continue
 		}
-		if v, err := strconv.ParseInt(p, 10, 64); err == nil && v > 0 {
-			out = append(out, v)
+		// 范围：50-90 / 50~90
+		if i := strings.IndexAny(p, "-~"); i > 0 && i < len(p)-1 {
+			lo, err1 := strconv.ParseInt(strings.TrimSpace(p[:i]), 10, 64)
+			hi, err2 := strconv.ParseInt(strings.TrimSpace(p[i+1:]), 10, 64)
+			if err1 == nil && err2 == nil && lo > 0 && hi >= lo {
+				if hi-lo > 200 {
+					hi = lo + 200
+				}
+				for v := lo; v <= hi; v++ {
+					push(v)
+				}
+				continue
+			}
+		}
+		if v, err := strconv.ParseInt(p, 10, 64); err == nil {
+			push(v)
 		}
 	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
 	if len(out) == 0 {
-		out = []int64{baseCmd}
+		return []int64{baseCmd}
 	}
 	return out
 }
@@ -434,6 +462,7 @@ func handleMilkTeaAction(w http.ResponseWriter, r *http.Request) {
 		ExtFrom   int     `json:"ext_from"` // scan：ext 字段号起始（含）
 		ExtTo     int     `json:"ext_to"`   // scan：ext 字段号结束（含）
 		Form      string  `json:"form"`     // scan：载荷形态 item|flat
+		NoExt     bool    `json:"no_ext"`   // scan：不带 ext，纯扫 cmd（画语义地图）
 	}
 	if body, err := io.ReadAll(io.LimitReader(r.Body, 65536)); err == nil && len(body) > 0 {
 		_ = json.Unmarshal(body, &req)
@@ -573,23 +602,29 @@ func handleMilkTeaAction(w http.ResponseWriter, r *http.Request) {
 		baseline := baseIt.Error
 
 		cmds := mtParseCmdList(req.CmdList, baseCmd)
-		from, to := req.ExtFrom, req.ExtTo
-		if from <= 0 {
-			from = 100
-		}
-		if to <= 0 {
-			to = 130
-		}
-		if to < from {
-			to = from
-		}
 		var extFields []int
-		for e := from; e <= to; e++ {
-			extFields = append(extFields, e)
+		from, to := req.ExtFrom, req.ExtTo
+		if req.NoExt {
+			// 不带 ext 扫 cmd → 画 cmd 语义地图
+			extFields = []int{0}
+			from, to = 0, 0
+		} else {
+			if from <= 0 {
+				from = 100
+			}
+			if to <= 0 {
+				to = 130
+			}
+			if to < from {
+				to = from
+			}
+			for e := from; e <= to; e++ {
+				extFields = append(extFields, e)
+			}
 		}
 		total := len(cmds) * len(extFields)
 		if total > 240 {
-			writeJSONMap(w, "ok", false, "error", "扫描规模过大（"+strconv.Itoa(total)+" 次请求，上限 240），请缩小 cmd 列表或 ext 区间")
+			writeJSONMap(w, "ok", false, "error", "扫描规模过大（"+strconv.FormatInt(int64(total), 10)+" 次请求，上限 240），请缩小 cmd 列表或 ext 区间")
 			return
 		}
 
@@ -602,6 +637,37 @@ func handleMilkTeaAction(w http.ResponseWriter, r *http.Request) {
 				anomalies = append(anomalies, it)
 			}
 		}
+
+		// ── cmd 语义地图：按返回形态给每个点分类 ──
+		//   queries 查询类：无错 + f(cmd+105) 有实体载荷（如 55/56/58/59/67/79）
+		//   silent  静默类：无错但载荷为空（多为查询/状态，如 64）
+		//   errors  报错类：带业务原文（需要参数，或流程前置条件未满足）
+		var queries, silent, errs []milkTeaAttempt
+		errGroups := map[string][]string{}
+		for _, it := range attempts {
+			tag := "cmd" + strconv.FormatInt(it.Cmd, 10)
+			if it.ExtField > 0 {
+				tag += "/ext" + strconv.Itoa(it.ExtField)
+			}
+			switch {
+			case it.OK && it.HasPayload:
+				queries = append(queries, it)
+			case it.OK:
+				silent = append(silent, it)
+			default:
+				errs = append(errs, it)
+				msg := it.Error
+				if msg == "" {
+					msg = "(无返回)"
+				}
+				errGroups[msg] = append(errGroups[msg], tag)
+			}
+		}
+
+		note := "固定载荷只变 ext 字段号。基线条（无 ext）的报错是「参数缺失」默认值；报错与基线不同、或无错返回的字段号，即为服务端真正消费的字段。"
+		if req.NoExt {
+			note = "不带 ext 扫 cmd → 画语义地图：queries=查询类（有实体回包）、silent=静默类（无错但回包空）、errors=报错类。重点看 errors 里报错原文**各不相同**的 cmd —— 若某个 cmd 报「请先选择果实」之类，它就是制作前的「选择果实」步骤。"
+		}
 		writeJSON(w, map[string]interface{}{
 			"ok":           true,
 			"action":       "scan",
@@ -612,10 +678,17 @@ func handleMilkTeaAction(w http.ResponseWriter, r *http.Request) {
 			"payload_desc": "id=" + strconv.FormatInt(id, 10) + " count=" + strconv.FormatInt(max64(req.Count, 1), 10) + " form=" + orDefault(req.Form, "item"),
 			"cmds":         cmds,
 			"ext_range":    []int{from, to},
+			"no_ext":       req.NoExt,
 			"total":        total,
 			"attempts":     attempts,
 			"anomalies":    anomalies,
-			"note":         "固定载荷只变 ext 字段号。基线条（无 ext）的报错是「参数缺失」默认值；扫描结果中报错与基线不同、或无错返回的字段号，即为服务端真正消费的字段 —— 那才是制作奶茶要用的 ext 号。",
+			"map": map[string]interface{}{
+				"queries":     queries,
+				"silent":      silent,
+				"errors":      errs,
+				"error_groups": errGroups,
+			},
+			"note": note,
 		})
 		return
 	case "custom":

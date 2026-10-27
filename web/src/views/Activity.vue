@@ -1021,7 +1021,8 @@ async function loadMilkTea() {
 const mtAct = reactive({
   busy: false, recipeId: '', uid: '', count: '1', result: null,
   // 协议扫描（cmd × ext 字段号矩阵）
-  scanCmd: '62', scanExtFrom: '100', scanExtTo: '130', scanForm: 'item', scanFruitId: ''
+  scanCmd: '62', scanExtFrom: '100', scanExtTo: '130', scanForm: 'item', scanFruitId: '',
+  scanNoExt: false, scanMapRange: '50-90'
 })
 
 function mtActLabel(a) {
@@ -1058,6 +1059,13 @@ async function mtDoAction(action) {
       payload.form = mtAct.scanForm
       payload.fruitId = Number(mtAct.scanFruitId) || 0
       payload.recipeId = Number(mtAct.recipeId) || 0
+      payload.no_ext = !!mtAct.scanNoExt
+    }
+    if (action === 'scanmap') {
+      payload.action = 'scan'
+      payload.cmd = Number(mtAct.scanCmd) || 62
+      payload.cmd_list = mtAct.scanMapRange || '50-90'
+      payload.no_ext = true
     }
     const { data } = await api.post('/api/activity/milktea/action', payload, { timeout: 180000 })
     mtAct.result = data
@@ -1606,7 +1614,11 @@ onUnmounted(() => { window.removeEventListener('account-switched', onSwitched) }
               <input v-model="mtAct.scanFruitId" placeholder="如 11822"
                      style="width:96px;padding:4px 6px;font-size:12px;border:1px solid #d9d9d9;border-radius:6px" />
             </label>
+            <label style="font-size:12px;display:flex;align-items:center;gap:4px" title="勾选后不附加任何 ext，只扫 cmd 本身，用于画 cmd 语义地图">
+              <input type="checkbox" v-model="mtAct.scanNoExt" /> 不带 ext
+            </label>
             <button class="act-btn" :class="{ disabled: mtAct.busy }" :disabled="mtAct.busy" @click="mtDoAction('scan')">🔬 开始扫描</button>
+            <button class="act-btn" :class="{ disabled: mtAct.busy }" :disabled="mtAct.busy" @click="mtDoAction('scanmap')">🗺 扫 cmd 地图 50-90</button>
             <span v-if="mtAct.busy" style="font-size:12px;color:#888">扫描中…（并发 4，请稍候）</span>
           </div>
 
@@ -1642,6 +1654,23 @@ onUnmounted(() => { window.removeEventListener('account-switched', onSwitched) }
                 无。说明这段 ext 区间内没有服务端会解析的字段 —— 换个区间（如 1~60、60~99、130~200）再扫。
               </li>
             </ul>
+
+            <template v-if="mtAct.result.map">
+              <div style="margin-top:10px;font-size:12px;display:flex;flex-wrap:wrap;gap:12px">
+                <span style="color:#185FA5">查询类 {{ (mtAct.result.map.queries || []).length }}（有实体回包）</span>
+                <span style="color:#BA7517">静默类 {{ (mtAct.result.map.silent || []).length }}（无错但回包空）</span>
+                <span style="color:#A32D2D">报错类 {{ (mtAct.result.map.errors || []).length }}</span>
+              </div>
+              <div style="margin-top:6px;font-size:12px;font-weight:500">按报错原文分组：</div>
+              <div v-for="(tags, msg) in (mtAct.result.map.error_groups || {})" :key="String(msg)"
+                   style="margin-top:4px;font-size:12px;padding:4px 8px;background:#FCEBEB;border-radius:6px">
+                <b style="color:#A32D2D">{{ msg }}</b>
+                <span style="color:#888"> × {{ tags.length }}</span>
+                <div style="color:#666;word-break:break-all;margin-top:2px">{{ tags.join('、') }}</div>
+              </div>
+              <div v-if="!(mtAct.result.map.error_groups && Object.keys(mtAct.result.map.error_groups).length)"
+                   style="margin-top:4px;font-size:12px;color:#999">无报错项</div>
+            </template>
 
             <details style="margin-top:6px">
               <summary style="font-size:12px;cursor:pointer;color:#666">展开全部 {{ (mtAct.result.attempts || []).length }} 条原始返回</summary>
