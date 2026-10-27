@@ -1164,13 +1164,18 @@ function fmtMilkTeaDate(ts) {
 /* ---------- 奶茶协议探测（Operate 试探，游戏内抓包用） ---------- */
 const mtProbe = reactive({ id: '', cmd: '', ext_field: '', ext_hex: '', result: '', busy: false })
 
+// 节点 id：手填优先；留空自动回落到概览已定位的店铺节点（如 2026110101）
+function mtProbeNodeID() {
+  return Number(mtProbe.id) || Number(milkTea.ov && milkTea.ov.shop_id) || 0
+}
+
 async function mtProbeSend() {
   const a = acc(); if (!a) return
   mtProbe.busy = true
   try {
     const { data } = await api.post('/api/activity/milktea/probe', {
       accountId: a,
-      id: Number(mtProbe.id) || 0,
+      id: mtProbeNodeID(),
       cmd: Number(mtProbe.cmd) || 0,
       ext_field: Number(mtProbe.ext_field) || 0,
       ext_hex: (mtProbe.ext_hex || '').trim(),
@@ -1212,7 +1217,8 @@ function parseHexList(v) {
 // 服务端单次总 cmd 上限 128，此处按 128 一批拆分；结果成功项排前，并自动下载 milktea-sweep.json
 async function mtSweepCmds() {
   const a = acc(); if (!a) return
-  if (!Number(mtProbe.id)) { app.error('请先填节点 id'); return }
+  const nodeId = mtProbeNodeID()
+  if (!nodeId) { app.error('请先填节点 id（或先点一次「刷新数据」让系统自动定位店铺节点）'); return }
   const cmds = parseNumList(mtProbe.cmd, 1, 30)
   const extHexes = parseHexList(mtProbe.ext_hex)
   let extFields = parseNumList(mtProbe.ext_field, 0, -1)
@@ -1244,7 +1250,7 @@ async function mtSweepCmds() {
         else sweeps.push({ ext_field: Number(it.ef) || 0, ext_hex: it.hex, cmds: [it.c] })
       }
       const { data } = await api.post('/api/activity/milktea/probe', {
-        accountId: a, sweep: true, id: Number(mtProbe.id) || 0, sweeps,
+        accountId: a, sweep: true, id: nodeId, sweeps,
       })
       if (data && Array.isArray(data.sweep)) sweep.push(...data.sweep)
       last = data
@@ -1252,13 +1258,13 @@ async function mtSweepCmds() {
     // 成功项排前，便于快速定位有效 cmd/ext
     sweep.sort((x, y) => (y.ok ? 1 : 0) - (x.ok ? 1 : 0))
     const okCount = sweep.filter((s) => s.ok).length
-    const payload = { ...(last || {}), id: Number(mtProbe.id) || 0, ok_count: okCount, total: sweep.length, sweep }
+    const payload = { ...(last || {}), id: nodeId, ok_count: okCount, total: sweep.length, sweep }
     mtProbe.result = JSON.stringify(payload, null, 1)
     const blob = new Blob([JSON.stringify(payload, null, 1)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const el = document.createElement('a')
     el.href = url
-    el.download = `milktea-sweep-${Number(mtProbe.id) || 0}.json`
+    el.download = `milktea-sweep-${nodeId}.json`
     el.click()
     URL.revokeObjectURL(url)
     app.success(`扫描完成：${sweep.length} 组，成功 ${okCount} 组，结果已下载`)
@@ -1660,9 +1666,9 @@ onUnmounted(() => { window.removeEventListener('account-switched', onSwitched) }
             </span>
           </div>
           <div class="act-hint">店铺等级 / 今日售出 / 营业速度 / 员工数据藏在游戏网关回包的未映射字段中。f121 店铺状态候选值（对照游戏内数值确认字段号）：<template v-if="milkTea.data.shop && milkTea.data.shop.extra">{{ Object.entries(milkTea.data.shop.extra).map(([k, v]) => k + '=' + v).join('，') || '（内层无其余 varint 字段）' }}</template><template v-else>—</template></div>
-          <div class="act-hint" style="margin-top:6px">操作节点探测：在节点清单里找到「制作奶茶」「领取员工收益」等节点 id，填入下方发送 Operate 试探（回包原文以字段树返回，错误时返回服务端报错原文）。</div>
+          <div class="act-hint" style="margin-top:6px">操作节点探测：节点 id <b>可留空</b>（自动用概览已定位的店铺节点，如 2026110101）；也可手动填入其他节点试探。回包原文以字段树返回，错误时返回服务端报错原文。</div>
           <div style="display:flex;flex-wrap:wrap;gap:6px;margin:8px 0;align-items:center">
-            <input v-model="mtProbe.id" placeholder="节点 id，如 1659" style="width:130px;padding:4px 8px;font-size:12px;border:1px solid #d9d9d9;border-radius:6px">
+            <input v-model="mtProbe.id" placeholder="节点 id（留空自动定位）" style="width:150px;padding:4px 8px;font-size:12px;border:1px solid #d9d9d9;border-radius:6px">
             <input v-model="mtProbe.cmd" placeholder="cmd，如 1" style="width:90px;padding:4px 8px;font-size:12px;border:1px solid #d9d9d9;border-radius:6px">
             <input v-model="mtProbe.ext_field" placeholder="ext字段号(选填)" style="width:120px;padding:4px 8px;font-size:12px;border:1px solid #d9d9d9;border-radius:6px">
             <input v-model="mtProbe.ext_hex" placeholder="ext hex(选填，; 分隔多候选)" style="width:230px;padding:4px 8px;font-size:12px;border:1px solid #d9d9d9;border-radius:6px">
