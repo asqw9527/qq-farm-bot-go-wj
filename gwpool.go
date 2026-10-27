@@ -113,8 +113,8 @@ func (p *ClientPool) onKick(accountID string) {
 	}
 	cfg := models.GetAutoReconnect(accountID)
 	if !cfg.Enabled || cfg.ReconnectDelayMin <= 0 {
-		// 自动重连未开启：维持原行为，立即用 YYB 刷新 code 重连
-		if newCode, cerr := refreshCodeFromYyb(acc); cerr == nil && newCode != "" {
+		// 自动重连未开启：维持原行为，立即换 code 重连（按账号类型走 YYB / NapCat）
+		if newCode, cerr := refreshCodeForAccount(acc); cerr == nil && newCode != "" {
 			acc.Code = newCode
 			models.AddOrUpdateAccount(*acc)
 		}
@@ -193,6 +193,47 @@ func refreshCodeFromYyb(acc *models.Account) (string, error) {
 	return getCodeFromYyb(apiBase, apiKey, acc.OpenID, "")
 }
 
+// refreshCodeFromNapcat 用账号绑定的 NapCat 配置重新签 QQ 农场 code（loginWithAppId）。
+func refreshCodeFromNapcat(acc *models.Account) (string, error) {
+	if acc.QQLogin == nil {
+		return "", fmt.Errorf("账号未绑定 NapCat 配置，无法自动刷新 QQ code")
+	}
+	q := acc.QQLogin
+	cfg := models.GetQQLoginConfig()
+	pp := cfg.PluginPath
+	if pp == "" {
+		pp = "napcat-plugin-qq-farm-code"
+	}
+	code, _, err := fetchQQFarmCode(q.NapcatBase, q.NapcatKey, q.AppID, q.Ver, pp)
+	return code, err
+}
+
+// refreshCodeForAccount 按账号类型自动换 code：
+//   - 第三方应用宝(thirdparty 非空) → 第三方接口
+//   - QQ 平台且绑定 NapCat(acc.QQLogin 非空) → NapCat loginWithAppId
+//   - 其余(微信内置 YYB) → 用 openid 刷新
+//
+// 取代 refreshCodeFromYyb 成为被踢/连接失败重连的统一换 code 入口。
+func refreshCodeForAccount(acc *models.Account) (string, error) {
+	if acc.Thirdparty != nil {
+		if acc.Thirdparty.APIBase == "" || acc.Thirdparty.APIToken == "" || acc.Thirdparty.OpenID == "" {
+			return "", fmt.Errorf("第三方应用宝配置不完整（apiBase/apiToken/openid）")
+		}
+		return getCodeFromThirdpartyYyb(acc.Thirdparty.APIBase, acc.Thirdparty.APIToken, acc.Thirdparty.OpenID, false)
+	}
+	if acc.Platform == "qq" && acc.QQLogin != nil {
+		return refreshCodeFromNapcat(acc)
+	}
+	if acc.OpenID != "" {
+		apiBase, apiKey := resolveYybCreds(nil)
+		return getCodeFromYyb(apiBase, apiKey, acc.OpenID, "")
+	}
+	if acc.QQLogin != nil {
+		return refreshCodeFromNapcat(acc)
+	}
+	return "", fmt.Errorf("账号无 openid 或 NapCat 配置，无法自动刷新")
+}
+
 // connectLocked 单飞连接：同一账号同时只有一个 connect 在进行。
 // 并发调用方（前端多请求 Get / onKick / scanAutoReconnect / 手动重试）共享同一次登录结果，
 // 避免多连接并发登录触发游戏“账号已在其他地方登录”自踢死循环。
@@ -211,8 +252,8 @@ func (p *ClientPool) connectLocked(acc *models.Account) (*gw.Client, error) {
 
 	c, err := connect(acc)
 	if err != nil && !gw.IsBanError(err) {
-		// code 过期 → 用持久 openid 自动刷新重试一次（封号 1000016 直接放弃，不再无效重试）
-		if newCode, cerr := refreshCodeFromYyb(acc); cerr == nil && newCode != "" {
+		// code 过期 → 按账号类型自动换 code 重试一次（封号 1000016 直接放弃，不再无效重试）
+		if newCode, cerr := refreshCodeForAccount(acc); cerr == nil && newCode != "" {
 			acc.Code = newCode
 			models.AddOrUpdateAccount(*acc)
 			c, err = connect(acc)

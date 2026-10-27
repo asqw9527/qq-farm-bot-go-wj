@@ -192,6 +192,7 @@ type GlobalConfig struct {
 	SystemConfig            SystemConfig             `json:"systemConfig"`
 	CaptureConfig           CaptureConfig            `json:"captureConfig"`
 	GlobalWxConfig          GlobalWxConfig           `json:"globalWxConfig"`
+	QQLoginConfig           QQLoginConfig           `json:"qqLoginConfig"`
 	DeviceProtocol          DeviceProtocol           `json:"deviceProtocol"`
 	ActiveAccountID         string                   `json:"activeAccountId"`
 }
@@ -234,6 +235,31 @@ type GlobalWxConfig struct {
 	AutoReconnect        bool   `json:"autoReconnect"`
 	ReconnectDelayMin    int    `json:"reconnectDelayMin"`
 	ReconnectMaxAttempts int    `json:"reconnectMaxAttempts"`
+}
+
+// QQLoginConfig QQ 扫码登录（NapCat 桥接）配置
+// QQ 经典农场小程序登录 code 由 QQNT 内核 misc.loginWithAppId 签发，
+// 本 BOT 通过 NapCat + qq-code 插件（fubiwangluo/qq-code）的 /proto/code 接口取 code，
+// 再连农场网关 platform=qq。需先在 NapCat 登录 QQ 并安装该插件。
+type QQLoginConfig struct {
+	Enabled    bool   `json:"enabled"`    // 是否在面板暴露「QQ 扫码登录」
+	NapcatBase string `json:"napcatBase"` // NapCat WebUI 地址，例如 http://127.0.0.1:6099
+	NapcatKey  string `json:"napcatKey"`  // qq-code 插件 key（data/config.json 的 key；留空=不鉴权）
+	AppID      string `json:"appId"`      // QQ 经典农场小程序 appId，默认 1112386029
+	Ver        string `json:"ver"`        // 覆盖客户端版本号（探测新版本用），空=用系统版本
+	PluginPath string `json:"pluginPath"` // NapCat 插件路由名，默认 napcat-plugin-qq-farm-code
+}
+
+// DefaultQQLoginConfig 默认 QQ 扫码登录配置
+func DefaultQQLoginConfig() QQLoginConfig {
+	return QQLoginConfig{
+		Enabled:    false,
+		NapcatBase: "",
+		NapcatKey:  "",
+		AppID:      "1112386029",
+		Ver:        "",
+		PluginPath: "napcat-plugin-qq-farm-code",
+	}
 }
 
 // DeviceProtocol 设备协议配置
@@ -343,6 +369,7 @@ func DefaultGlobalConfig() GlobalConfig {
 		SystemConfig:            DefaultSystemConfig(),
 		CaptureConfig:           DefaultCaptureConfig(),
 		GlobalWxConfig:          DefaultGlobalWxConfig(),
+		QQLoginConfig:           DefaultQQLoginConfig(),
 		DeviceProtocol:          DefaultDeviceProtocol(),
 	}
 }

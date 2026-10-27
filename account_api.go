@@ -28,6 +28,8 @@ func registerAccountAPI(mux *http.ServeMux) {
 	mux.HandleFunc("/api/yyb/qr/create", handleYybQRCreate)
 	mux.HandleFunc("/api/yyb/qr/poll", handleYybQRPoll)
 	mux.HandleFunc("/api/yyb/qr/confirm", handleYybQRConfirm)
+	// QQ 扫码登录（NapCat 桥接）：取 code / 登录 / 系统配置
+	registerQQLoginAPI(mux)
 }
 
 func isAdminUser(u *models.User) bool {

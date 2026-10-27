@@ -40,6 +40,15 @@ type ThirdpartyConfig struct {
 	ReconnectMaxAttempts *int   `json:"reconnectMaxAttempts,omitempty"` // nil=回退全局
 }
 
+// QQLoginAccountConfig QQ 扫码登录（NapCat 桥接）的账号级凭据，随账号持久化，
+// 被踢/异地登录后由 refreshCodeFromNapcat 重新签 code 自动重连。
+type QQLoginAccountConfig struct {
+	NapcatBase string `json:"napcatBase"`
+	NapcatKey  string `json:"napcatKey"`
+	AppID      string `json:"appId"`
+	Ver        string `json:"ver"`
+}
+
 type Account struct {
 	ID         string            `json:"id"`
 	Name       string            `json:"name"`
@@ -53,6 +62,7 @@ type Account struct {
 	Avatar     string            `json:"avatar"`
 	Status     string            `json:"status"`               // "online" / "offline"
 	Thirdparty *ThirdpartyConfig `json:"thirdparty,omitempty"` // 第三方应用宝配置（可选）
+	QQLogin    *QQLoginAccountConfig `json:"qqLogin,omitempty"` // QQ 扫码登录（NapCat 桥接）凭据（可选）
 	CreatedAt  string            `json:"createdAt"`
 	UpdatedAt  string            `json:"updatedAt"`
 }
@@ -500,6 +510,27 @@ func SetSystemConfig(c config.SystemConfig) error {
 		c.ClientVersion = config.DefaultSystemConfig().ClientVersion
 	}
 	globalConfig.SystemConfig = c
+	return saveGlobalConfig()
+}
+
+// GetQQLoginConfig 获取 QQ 扫码登录配置
+func GetQQLoginConfig() config.QQLoginConfig {
+	mu.RLock()
+	defer mu.RUnlock()
+	return globalConfig.QQLoginConfig
+}
+
+// SetQQLoginConfig 保存 QQ 扫码登录配置（napcatBase/key/appId/ver/pluginPath）
+func SetQQLoginConfig(c config.QQLoginConfig) error {
+	mu.Lock()
+	defer mu.Unlock()
+	if c.AppID == "" {
+		c.AppID = config.DefaultQQLoginConfig().AppID
+	}
+	if c.PluginPath == "" {
+		c.PluginPath = config.DefaultQQLoginConfig().PluginPath
+	}
+	globalConfig.QQLoginConfig = c
 	return saveGlobalConfig()
 }
 

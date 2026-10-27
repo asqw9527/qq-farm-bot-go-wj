@@ -79,6 +79,7 @@ function switchQrType(t) {
   qrType.value = t
   stopQr(); qrUrl.value = ''; qrMsg.value = ''
   if (t === 'wx') startQrLogin()
+  else loadQQConfig()
 }
 let qrTimer = null
 let qrSeq = 0
@@ -116,6 +117,7 @@ async function _pollQrOnce(sessionId) {
   }
 }
 async function startQrLogin() {
+  if (qrType.value !== 'wx') return // 仅微信走 YYB 扫码；QQ 走 NapCat 表单
   stopQr(); qrUrl.value = ''; qrMsg.value = '正在获取二维码…'; qrBusy.value = true
   const seq = qrSeq
   let sessionId = null
@@ -329,6 +331,58 @@ async function addByThirdpartyYyb() {
   } finally { t3rdBusy.value = false }
 }
 
+/* ---------- QQ 扫码登录（NapCat 桥接，参考 fubiwangluo/qq-code） ---------- */
+const qqNapcatBase = ref(''); const qqNapcatKey = ref(''); const qqAppId = ref('1112386029')
+const qqVer = ref(''); const qqName = ref(''); const qqSaveDefault = ref(false); const qqBusy = ref(false); const qqMsg = ref('')
+async function loadQQConfig() {
+  try {
+    const { data } = await api.get('/api/qq/config')
+    const d = data && data.data
+    if (!d) return
+    if (d.napcatBase) qqNapcatBase.value = d.napcatBase
+    if (d.appId) qqAppId.value = d.appId
+    if (d.ver) qqVer.value = d.ver
+  } catch (e) {}
+}
+async function qqLogin() {
+  qqMsg.value = ''
+  if (!qqNapcatBase.value.trim()) { qqMsg.value = '请填写 NapCat 地址'; return }
+  qqBusy.value = true
+  try {
+    // 可选：先把 NapCat 配置存为系统默认，下次免填
+    if (qqSaveDefault.value) {
+      try {
+        await api.post('/api/qq/config', {
+          enabled: true,
+          napcatBase: qqNapcatBase.value.trim(),
+          napcatKey: qqNapcatKey.value,
+          appId: qqAppId.value.trim() || '1112386029',
+          ver: qqVer.value.trim(),
+        })
+      } catch (_) { /* 保存失败不影响本次登录 */ }
+    }
+    const { data } = await api.post('/api/qq/login', {
+      napcatBase: qqNapcatBase.value.trim(),
+      napcatKey: qqNapcatKey.value,
+      appId: qqAppId.value.trim() || '1112386029',
+      ver: qqVer.value.trim(),
+      name: qqName.value.trim(),
+    }, { timeout: 60000 })
+    if (!(data && data.ok)) {
+      qqMsg.value = 'QQ 登录失败: ' + (data?.error || '未知')
+      qqBusy.value = false
+      return
+    }
+    app.success('QQ 扫码登录成功')
+    sheet.value = ''
+    location.reload()
+  } catch (e) {
+    qqMsg.value = 'QQ 登录失败: ' + (e.response?.data?.error || e.message || '未知')
+  } finally {
+    qqBusy.value = false
+  }
+}
+
 // 切号事件：刷新账号列表（在线状态/active 标记随新账号变化）
 const onAccountSwitched = () => loadAccounts()
 onMounted(() => { loadAccounts(); window.addEventListener('account-switched', onAccountSwitched) })
@@ -352,7 +406,7 @@ onUnmounted(() => { stopQr(); window.removeEventListener('account-switched', onA
     <div class="sec-title"><span>添加账号</span><span style="font-size:12px;color:var(--muted)">{{ accounts.length }} / {{ limitText }}</span></div>
     <div class="menu">
       <button class="sub-item" @click="sheet='add'"><span class="mi">🔑</span>手动添加 code<span class="arr">›</span></button>
-      <button class="sub-item" @click="sheet='qr'; loadRc(); startQrLogin()"><span class="mi">📱</span>扫码登录<span class="arr">›</span></button>
+      <button class="sub-item" @click="sheet='qr'; loadRc(); loadQQConfig(); qrType='wx'; startQrLogin()"><span class="mi">📱</span>扫码登录<span class="arr">›</span></button>
       <button class="sub-item" @click="sheet='thirdparty'; t3rdErr=''"><span class="mi">🔗</span>第三方登录<span class="arr">›</span></button>
     </div>
 
@@ -462,16 +516,27 @@ onUnmounted(() => { stopQr(); window.removeEventListener('account-switched', onA
         </p>
       </template>
 
-      <!-- QQ 渠道：游戏网关链路暂不支持 QQ 区，引导走手动 code / 第三方登录 -->
+      <!-- QQ 渠道：通过 NapCat + qq-code 插件取 QQ 农场 code（参考 fubiwangluo/qq-code） -->
       <template v-else>
-        <div style="width:100%;max-width:320px;background:var(--panel,#f7f8fa);border:1px solid var(--border,#e5e7eb);border-radius:12px;padding:14px;font-size:13px;line-height:1.8">
-          <b>QQ 扫码登录暂未开放</b><br>
-          当前游戏网关链路仅支持<b>微信区</b>账号（微信小程序登录换 code），QQ 区账号无法通过扫码接入。<br>
-          如需添加 <b>QQ 区</b>账号，请使用：
-          <div style="display:flex;gap:8px;margin-top:10px">
-            <button class="chip" @click="addPlatform='qq'; sheet='add'; stopQr()">🔑 手动添加 code（QQ）</button>
-            <button class="chip" @click="sheet='thirdparty'; t3rdErr=''; stopQr()">🔗 第三方登录</button>
+        <div style="width:100%;max-width:340px;display:flex;flex-direction:column;gap:8px">
+          <p style="font-size:12px;color:var(--muted);text-align:center;line-height:1.6;margin:0">
+            需先在 <b>NapCat</b> 登录目标 QQ（扫码一次即可），并安装启用 <b>napcat-plugin-qq-farm-code</b> 插件。
+          </p>
+          <input v-model="qqNapcatBase" class="field" placeholder="NapCat 地址，如 http://127.0.0.1:6099">
+          <input v-model="qqNapcatKey" class="field" placeholder="插件 Key（data/config.json 的 key，留空=不鉴权）" type="password" autocomplete="off">
+          <div style="display:flex;gap:8px">
+            <input v-model="qqAppId" class="field" placeholder="appId（默认 1112386029）" style="flex:2">
+            <input v-model="qqVer" class="field" placeholder="版本(可选)" style="flex:1.4">
           </div>
+          <input v-model="qqName" class="field" placeholder="备注名（可选，留空用 QQ 号）">
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);cursor:pointer">
+            <input type="checkbox" v-model="qqSaveDefault"> 保存为默认（下次免填地址/Key）
+          </label>
+          <p v-if="qqMsg" style="font-size:12px;color:var(--danger,#e5484d);text-align:center;margin:0;word-break:break-all">{{ qqMsg }}</p>
+          <button class="close" :disabled="qqBusy" @click="qqLogin">{{ qqBusy ? '获取并登录中…' : '🐧 获取并登录' }}</button>
+          <p style="font-size:11px;color:var(--muted);text-align:center;margin:0;line-height:1.6">
+            原理：调 NapCat 插件 <code>/proto/code</code>，由 QQNT 内核 <code>loginWithAppId</code> 签出 QQ 农场 code，再用 platform=qq 连网关。被踢后用同一 NapCat 自动重签 code 重连。
+          </p>
         </div>
       </template>
     </div>
@@ -508,7 +573,7 @@ onUnmounted(() => { stopQr(); window.removeEventListener('account-switched', onA
       </div>
     </div>
 
-    <button class="close" v-if="!qrBusy" style="margin-top:4px" @click="startQrLogin">重新获取二维码</button>
+    <button class="close" v-if="!qrBusy && qrType==='wx'" style="margin-top:4px" @click="startQrLogin">重新获取二维码</button>
     <button class="close" style="margin-top:8px" @click="sheet=''; stopQr()">关闭</button>
   </div>
 
