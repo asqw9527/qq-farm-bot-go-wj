@@ -1060,7 +1060,12 @@ function mtAttemptLine(t) {
   const parts = ['cmd ' + t.cmd]
   if (t.ext_field) parts.push('ext#' + t.ext_field + (t.ext_hex ? '(' + t.ext_hex + ')' : ' 空'))
   if (t.desc) parts.push(t.desc)
-  return parts.join(' · ') + ' → ' + (t.ok ? '✅ 成功（服务端无错返回）' : (t.error || '无返回'))
+  let line = parts.join(' · ') + ' → ' + (t.ok ? '✅ 成功（服务端无错返回）' : (t.error || '无返回'))
+  if (t.ok && t.reply) {
+    const s = JSON.stringify(t.reply)
+    line += '　回包: ' + (s.length > 220 ? s.slice(0, 220) + '…' : s)
+  }
+  return line
 }
 
 // 可选配方（cmd 58，仅已解锁）；可选员工（cmd 56 雇佣列表）

@@ -135,46 +135,105 @@ func mtExtNested(field int, kvs ...[2]int64) []byte {
 //
 // 依据：Node 版 activitypb.proto 里每种玩法占一个专属扩展字段号（101 随机商店 /
 // 102 兑换商店 / 103 青梅领取…），且参数形态高度一致 —— {1:id, 2:count}。
-// 奶茶对应 121，故这里覆盖「扁平 / 嵌套 / repeated」三类形态。
-func mtCraftCandidates(recipeID, fruitID, count int64) []mtExtPair {
+// 奶茶对应 121。报错「选择的果实无效」说明载荷需要果实条目而非配方 id，
+// 因此 fruitIDs（从 cmd 58 配方原始树自动挖出）优先于 recipeID。
+func mtCraftCandidates(recipeID int64, fruitIDs []int64, count int64) []mtExtPair {
 	if count <= 0 {
 		count = 1
 	}
 	var out []mtExtPair
 	add := func(desc string, data []byte) { out = append(out, mtExtPair{Desc: desc, Data: data}) }
 
-	// ① 扁平：{1:id} / {1:id,2:count} / {2:…} / {3:…}
-	idVariants := func(label string, id int64) {
-		add(label+"→f1", mtExtBuild([2]int64{1, id}))
-		add(label+"→f1 + f2=count", mtExtBuild([2]int64{1, id}, [2]int64{2, count}))
-		add(label+"→f2", mtExtBuild([2]int64{2, id}))
-		add(label+"→f2 + f3=count", mtExtBuild([2]int64{2, id}, [2]int64{3, count}))
-		add(label+"→f3", mtExtBuild([2]int64{3, id}))
-		// repeated f1：[id]（长度 1 的数组，常见于 repeated recipeIds）
-		rep := proto.NewBuilder()
-		rep.FieldInt64(1, id)
-		add(label+"→f1[]", rep.Bytes())
-	}
-	if recipeID > 0 {
-		idVariants("配方id", recipeID)
-	}
-	if fruitID > 0 && fruitID != recipeID {
-		idVariants("果实id", fruitID)
+	// ① 果实 id 优先（首个果实给全套形态，其余给核心形态）
+	for i, id := range fruitIDs {
+		if i == 0 {
+			add("果实" + strconv.FormatInt(id, 10) + "→f1", mtExtBuild([2]int64{1, id}))
+			add("果实" + strconv.FormatInt(id, 10) + "→f1 + f2=count", mtExtBuild([2]int64{1, id}, [2]int64{2, count}))
+			add("果实" + strconv.FormatInt(id, 10) + "→f2", mtExtBuild([2]int64{2, id}))
+			add("果实" + strconv.FormatInt(id, 10) + "→f1[]", mtExtBuild([2]int64{1, id}))
+			add("121:{1:{1:果实,2:count}}", mtExtNested(1, [2]int64{1, id}, [2]int64{2, count}))
+		} else {
+			add("果实" + strconv.FormatInt(id, 10) + "→f1 + f2=count", mtExtBuild([2]int64{1, id}, [2]int64{2, count}))
+			add("121:{1:{1:果实,2:count}}", mtExtNested(1, [2]int64{1, id}, [2]int64{2, count}))
+		}
 	}
 
-	// ② 嵌套：121:{1:{1:id,2:count}}、121:{2:{1:id}}（对应 corepb.Item 形态）
+	// ② 多果实组合：repeated 扁平 / repeated 嵌套（配方常需 2 种材料）
+	if len(fruitIDs) >= 2 {
+		flat := proto.NewBuilder()
+		nest := proto.NewBuilder()
+		for _, id := range fruitIDs[:2] {
+			flat.FieldInt64(1, id)
+			sub := proto.NewBuilder()
+			sub.FieldInt64(1, id)
+			sub.FieldInt64(2, 1)
+			nest.FieldMessage(1, sub.Bytes())
+		}
+		add("repeated f1=[果1,果2]", flat.Bytes())
+		add("121:repeated{1:{1:果,2:1}}", nest.Bytes())
+	}
+
+	// ③ 配方 id 形态（之前已试过但保留 {1:配方,2:count} 与嵌套）
 	if recipeID > 0 {
+		add("配方id→f1 + f2=count", mtExtBuild([2]int64{1, recipeID}, [2]int64{2, count}))
 		add("121:{1:{1:配方id,2:count}}", mtExtNested(1, [2]int64{1, recipeID}, [2]int64{2, count}))
-		add("121:{1:{1:配方id}}", mtExtNested(1, [2]int64{1, recipeID}))
-		add("121:{2:{1:配方id}}", mtExtNested(2, [2]int64{1, recipeID}))
-	}
-	if fruitID > 0 && fruitID != recipeID {
-		add("121:{1:{1:果实id,2:count}}", mtExtNested(1, [2]int64{1, fruitID}, [2]int64{2, count}))
-		add("121:{1:{1:果实id}}", mtExtNested(1, [2]int64{1, fruitID}))
 	}
 
-	// ③ 空 ext 兜底（实锤：cmd 62 不带 ext 时报「选择的果实无效」）
+	// ④ 空 ext 兜底
 	add("空 ext", nil)
+	return out
+}
+
+// mtDeriveFruitIDs 从 cmd 58 配方表的原始树里挖「果实/材料 id」候选：
+// 递归收集配方条目里所有 ≥10000 的 varint（排除配方 id 自身），
+// f6（作物 id 候选）排最前，最多 6 个。
+func mtDeriveFruitIDs(ctx context.Context, accountID string, shopID, recipeID int64) []int64 {
+	tree, err := milkTeaOperate(ctx, accountID, shopID, 58, 10*time.Second)
+	if err != nil {
+		return nil
+	}
+	arr := actTreeArr(tree, "f163", "f1")
+	var entry interface{}
+	for _, it := range arr {
+		if actTreeNum(it, "f1") == recipeID {
+			entry = it
+			break
+		}
+	}
+	if entry == nil {
+		return nil
+	}
+	var out []int64
+	has := func(v int64) bool {
+		for _, x := range out {
+			if x == v {
+				return true
+			}
+		}
+		return false
+	}
+	// f6（作物 id）优先
+	if f6 := actTreeNum(entry, "f6"); f6 >= 10000 && f6 != recipeID {
+		out = append(out, f6)
+	}
+	var walk func(v interface{})
+	walk = func(v interface{}) {
+		switch t := v.(type) {
+		case int64:
+			if t >= 10000 && t != recipeID && !has(t) && len(out) < 6 {
+				out = append(out, t)
+			}
+		case []interface{}:
+			for _, x := range t {
+				walk(x)
+			}
+		case map[string]interface{}:
+			for _, x := range t {
+				walk(x)
+			}
+		}
+	}
+	walk(entry)
 	return out
 }
 
@@ -193,8 +252,9 @@ func mtHireCandidates(uid int64) []mtExtPair {
 	return out
 }
 
-// mtClaimCmds 领取店铺营业值：尚未实锤的候选 cmd（其余均已实锤为查询/其它用途）
-var mtClaimCmds = []int64{57, 61, 64, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78}
+// mtClaimCmds 领取店铺营业值：cmd 64 已实锤命中（2026-10-27 用户实测无错返回），
+// 其余候选保留兜底
+var mtClaimCmds = []int64{64, 57, 61, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78}
 
 // ----- POST /api/activity/milktea/action -----
 
@@ -253,11 +313,30 @@ func handleMilkTeaAction(w http.ResponseWriter, r *http.Request) {
 
 	switch req.Action {
 	case "craft":
-		if req.RecipeID <= 0 && req.FruitID <= 0 {
+		if req.RecipeID <= 0 {
 			writeJSONMap(w, "ok", false, "error", "制作奶茶需要提供 recipeId（配方 id）")
 			return
 		}
-		for _, c := range mtCraftCandidates(req.RecipeID, req.FruitID, req.Count) {
+		// 报错「选择的果实无效」→ 载荷需要果实条目：从 cmd 58 配方树自动挖候选果实 id
+		fruitIDs := mtDeriveFruitIDs(ctx, accountID, shopID, req.RecipeID)
+		if req.FruitID > 0 {
+			fruitIDs = append([]int64{req.FruitID}, fruitIDs...)
+		}
+		// 去重
+		var uniq []int64
+		for _, id := range fruitIDs {
+			dup := false
+			for _, x := range uniq {
+				if x == id {
+					dup = true
+					break
+				}
+			}
+			if !dup {
+				uniq = append(uniq, id)
+			}
+		}
+		for _, c := range mtCraftCandidates(req.RecipeID, uniq, req.Count) {
 			try(62, milkTeaExtField, c.Data, c.Desc)
 			if attempts[len(attempts)-1].OK {
 				break // 成功即停，不再继续发
@@ -352,11 +431,11 @@ func wasOK(list []milkTeaAttempt) bool {
 func mtActionNote(action, shopID string) string {
 	switch action {
 	case "craft":
-		return "制作奶茶 cmd 62 已实锤（服务端会消费 ext 字段 121）。候选已覆盖官方 params 形态：扁平 {1:id,2:count} / 嵌套 121:{1:{1:id,2:count}} / repeated f1[] / 空 ext。若仍全部「选择的果实无效」，说明该 cmd 需要的不是配方 id 而是果实条目结构，把每条返回发来分析即可。"
+		return "制作奶茶 cmd 62 已实锤（服务端会消费 ext 字段 121）。报错「选择的果实无效」说明载荷需要果实条目：本轮已自动从 cmd 58 配方原始树挖出果实/材料 id 候选（≥10000 的 varint）并按官方形态生成候选。若仍全失败，把每条返回发来继续分析。"
 	case "hire":
-		return "添加员工 cmd 未实锤（尝试 57）。候选不匹配时请到协议诊断卡用「扫描(cmd×ext)」扩大范围。"
+		return "添加员工 cmd 未实锤（尝试 57，回「活动参数错误」说明 57 不接受此 payload 或不存在）。候选不匹配时请到协议诊断卡用「扫描(cmd×ext)」扩大范围。"
 	case "claim":
-		return "领取店铺营业值 cmd 未实锤，已按候选列表扫两轮（空载荷 → {1:1} 载荷）。返回「活动参数错误」=该 cmd 不接受此 payload；若某一条无错返回即为命中。"
+		return "cmd 64 已实测无错返回（2026-10-27 实锤命中，排在候选首位）。注意：请到游戏内核对收银台收益/金币是否真的增加——若金币没变，说明 64 可能是查询类接口而非领取，把成功项的回包 JSON 发我判别。"
 	}
 	return "自定义 Operate 尝试。"
 }

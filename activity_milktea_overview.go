@@ -265,6 +265,7 @@ func handleMilkTeaOverview(w http.ResponseWriter, r *http.Request) {
 				"raw_f5":     actTreeNum(it, "f5"), // 价格/等级门槛候选
 				"raw_f6":     actTreeNum(it, "f6"), // 作物/材料 id 候选
 				"total_sold": actTreeNum(it, "f7"),
+				"raw":        it, // 完整字段树（材料/果实 id 挖掘与诊断用）
 			})
 		}
 		out["recipes"] = recipes
