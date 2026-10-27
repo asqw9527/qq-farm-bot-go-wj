@@ -1018,10 +1018,14 @@ async function loadMilkTea() {
 
 /* ---------- 奶茶店铺操作（领取营业值 / 制作奶茶 / 添加员工） ---------- */
 // 协议尚未全部实锤：服务端会返回业务原文，这里逐候选尝试并原样回显，便于继续收敛。
-const mtAct = reactive({ busy: false, recipeId: '', uid: '', count: '1', result: null })
+const mtAct = reactive({
+  busy: false, recipeId: '', uid: '', count: '1', result: null,
+  // 协议扫描（cmd × ext 字段号矩阵）
+  scanCmd: '62', scanExtFrom: '100', scanExtTo: '130', scanForm: 'item', scanFruitId: ''
+})
 
 function mtActLabel(a) {
-  return ({ craft: '制作奶茶', claim: '领取营业值', hire: '添加员工' })[a] || a
+  return ({ craft: '制作奶茶', claim: '领取营业值', hire: '添加员工', scan: '协议扫描', custom: '自定义' })[a] || a
 }
 
 async function mtDoAction(action) {
@@ -1035,6 +1039,10 @@ async function mtDoAction(action) {
   if (action === 'hire' && !mtAct.uid) {
     app.error('请先选择一个员工'); return
   }
+  if (action === 'scan') {
+    const f = Number(mtAct.scanExtFrom), t = Number(mtAct.scanExtTo)
+    if (!f || !t || t < f) { app.error('ext 区间不合法'); return }
+  }
   mtAct.busy = true; mtAct.result = null
   try {
     const payload = { accountId: a, action }
@@ -1043,9 +1051,21 @@ async function mtDoAction(action) {
       payload.count = Number(mtAct.count) || 1
     }
     if (action === 'hire') payload.uid = Number(mtAct.uid) || 0
+    if (action === 'scan') {
+      payload.cmd = Number(mtAct.scanCmd) || 62
+      payload.ext_from = Number(mtAct.scanExtFrom) || 100
+      payload.ext_to = Number(mtAct.scanExtTo) || 130
+      payload.form = mtAct.scanForm
+      payload.fruitId = Number(mtAct.scanFruitId) || 0
+      payload.recipeId = Number(mtAct.recipeId) || 0
+    }
     const { data } = await api.post('/api/activity/milktea/action', payload, { timeout: 180000 })
     mtAct.result = data
-    if (data && data.done) {
+    if (action === 'scan') {
+      const n = (data && data.anomalies || []).length
+      if (n > 0) app.success('扫描完成：发现 ' + n + ' 个异常字段号，见下方')
+      else app.error('扫描完成：所有字段号返回都与基线一致（ext 可能不在这段区间）')
+    } else if (data && data.done) {
       app.success(label + '成功')
       await loadMilkTeaOverview()
     } else {
@@ -1060,7 +1080,12 @@ function mtAttemptLine(t) {
   const parts = ['cmd ' + t.cmd]
   if (t.ext_field) parts.push('ext#' + t.ext_field + (t.ext_hex ? '(' + t.ext_hex + ')' : ' 空'))
   if (t.desc) parts.push(t.desc)
-  let line = parts.join(' · ') + ' → ' + (t.ok ? '✅ 成功（服务端无错返回）' : (t.error || '无返回'))
+  // 区分三种结果：真生效 / 无错但无载荷（多为查询类）/ 业务报错
+  let verdict
+  if (!t.ok) verdict = t.error || '无返回'
+  else if (t.has_payload) verdict = '✅ 有实体回包（真产生业务结果）'
+  else verdict = '⚠ 无错但回包 f' + (t.cmd + 105) + ' 为空（多为查询/状态类，非真操作）'
+  let line = parts.join(' · ') + ' → ' + verdict
   if (t.ok && t.reply) {
     const s = JSON.stringify(t.reply)
     line += '　回包: ' + (s.length > 220 ? s.slice(0, 220) + '…' : s)
@@ -1532,12 +1557,13 @@ onUnmounted(() => { window.removeEventListener('account-switched', onSwitched) }
           </div>
 
           <div class="act-hint" style="margin-top:6px">
-            ⚠️ 协议状态：制作奶茶 <b>cmd 62</b> 已实锤（ext 字段 121 会被引擎消费），但载荷编码未解出；
-            领取营业值与添加员工 <b>cmd / 载荷尚未实锤</b>。点击后会按候选组合真实发送，并把服务端返回原样列在下方。
-            候选已覆盖官方 params 形态（参考 Node 版 activitypb.proto）：扁平 <code>{1:id,2:count}</code>、嵌套 <code>121:{1:{1:id,2:count}}</code>、repeated <code>f1[]</code>、空载荷；领取类会扫两轮（空 → <code>{1:1}</code>）。
+            ⚠️ 协议状态（2026-10-27 修正）：制作奶茶 <b>cmd 62</b> 能返回业务级中文报错 → 服务端确实受理；
+            但 8 种载荷全回同一句「选择的果实无效」。核对上游 <code>activitypb.proto</code> 后确认：
+            <code>OperateRequest</code> 的扩展字段只有 3/101/102/103/107/112/113/114，<b>不存在 121</b>，
+            上游三个项目也都没实现奶茶 → 继续穷举载荷形态无效，应改用下方「协议扫描」定位真实 ext 字段号。
           </div>
 
-          <template v-if="mtAct.result">
+          <template v-if="mtAct.result && mtAct.result.action !== 'scan'">
             <div style="margin-top:8px;font-size:12px">
               <b>{{ mtAct.result.done ? '✅ 操作成功' : '❌ 未命中（服务端返回如下）' }}</b>
               <span style="color:#888"> · 节点 {{ mtAct.result.shop_id }} · 共 {{ (mtAct.result.attempts || []).length }} 次尝试</span>
@@ -1545,6 +1571,80 @@ onUnmounted(() => { window.removeEventListener('account-switched', onSwitched) }
             <ul style="margin:6px 0 0;padding-left:18px;font-size:12px;line-height:1.7">
               <li v-for="(t, i) in (mtAct.result.attempts || [])" :key="'at'+i" :style="t.ok ? 'color:#2f7a41' : (t.accepted ? 'color:#b45309' : 'color:#999')">{{ mtAttemptLine(t) }}</li>
             </ul>
+            <div v-if="mtAct.result.note" class="act-hint" style="margin-top:6px">{{ mtAct.result.note }}</div>
+          </template>
+        </div>
+
+        <!-- 协议扫描：cmd × ext 字段号矩阵 -->
+        <div class="act-card">
+          <div class="act-card-hd">
+            <h4>🔬 协议扫描（cmd × ext 字段号）</h4>
+          </div>
+
+          <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+            <label style="font-size:12px">cmd
+              <input v-model="mtAct.scanCmd" placeholder="62" title="可填多个，逗号分隔，如 55,57,61,62"
+                     style="width:130px;padding:4px 6px;font-size:12px;border:1px solid #d9d9d9;border-radius:6px" />
+            </label>
+            <label style="font-size:12px">ext 区间
+              <input v-model="mtAct.scanExtFrom" style="width:56px;padding:4px 6px;font-size:12px;border:1px solid #d9d9d9;border-radius:6px" />
+              ~
+              <input v-model="mtAct.scanExtTo" style="width:56px;padding:4px 6px;font-size:12px;border:1px solid #d9d9d9;border-radius:6px" />
+            </label>
+            <select v-model="mtAct.scanForm" title="扫描期间固定不变的载荷形态"
+                    style="padding:4px 8px;font-size:12px;border:1px solid #d9d9d9;border-radius:6px">
+              <option value="item">{1:{1:id,2:count}} Item 形态（推荐）</option>
+              <option value="flat">{1:id,2:count} 扁平形态</option>
+            </select>
+            <label style="font-size:12px">id（留空自动取资产首项）
+              <input v-model="mtAct.scanFruitId" placeholder="如 11822"
+                     style="width:96px;padding:4px 6px;font-size:12px;border:1px solid #d9d9d9;border-radius:6px" />
+            </label>
+            <button class="act-btn" :class="{ disabled: mtAct.busy }" :disabled="mtAct.busy" @click="mtDoAction('scan')">🔬 开始扫描</button>
+            <span v-if="mtAct.busy" style="font-size:12px;color:#888">扫描中…（并发 4，请稍候）</span>
+          </div>
+
+          <div class="act-hint" style="margin-top:6px">
+            原理：<b>固定载荷、只改 ext 字段号</b>。先发一次「不带 ext」的基线条拿到参数缺失时的默认报错，
+            再横扫字段号区间 —— <b>报错与基线不同</b>、或<b>无错返回</b>的字段号，就是服务端真正解析并消费的那个。
+            载荷形态参照 proto 中真实存在的 <code>QingmeiWineStartParams{repeated Item items=1}</code>，
+            <code>corepb.Item{1:id, 2:count}</code>。单次请求上限 240。
+          </div>
+
+          <template v-if="mtAct.result && mtAct.result.action === 'scan'">
+            <div style="margin-top:8px;font-size:12px">
+              <b>基线（cmd {{ mtAct.result.baseline.cmd }}，不带 ext）</b> →
+              <span :style="mtAct.result.baseline.ok ? 'color:#b45309' : 'color:#999'">
+                {{ mtAct.result.baseline.ok ? (mtAct.result.baseline.has_payload ? '有实体回包' : '无错但回包 f' + (mtAct.result.baseline.cmd + 105) + ' 为空') : (mtAct.result.baseline.error || '无返回') }}
+              </span>
+              <div style="color:#666;margin-top:2px">
+                固定载荷 <code>{{ mtAct.result.payload_hex }}</code>（{{ mtAct.result.payload_desc }}） ·
+                ext {{ mtAct.result.ext_range[0] }}~{{ mtAct.result.ext_range[1] }} · 共 {{ mtAct.result.total }} 次请求
+              </div>
+            </div>
+
+            <div style="margin-top:6px;font-size:12px">
+              <b :style="(mtAct.result.anomalies || []).length ? 'color:#2f7a41' : 'color:#b45309'">
+                命中 {{ (mtAct.result.anomalies || []).length }} 个异常字段号
+              </b>
+              <span style="color:#888">（报错偏离基线或无错返回 → 该字段号被服务端真正解析）</span>
+            </div>
+            <ul style="margin:6px 0 0;padding-left:18px;font-size:12px;line-height:1.7">
+              <li v-for="(t, i) in (mtAct.result.anomalies || [])" :key="'an'+i"
+                  :style="t.ok ? 'color:#2f7a41' : 'color:#b45309'">{{ mtAttemptLine(t) }}</li>
+              <li v-if="!(mtAct.result.anomalies || []).length" style="color:#999">
+                无。说明这段 ext 区间内没有服务端会解析的字段 —— 换个区间（如 1~60、60~99、130~200）再扫。
+              </li>
+            </ul>
+
+            <details style="margin-top:6px">
+              <summary style="font-size:12px;cursor:pointer;color:#666">展开全部 {{ (mtAct.result.attempts || []).length }} 条原始返回</summary>
+              <ul style="margin:6px 0 0;padding-left:18px;font-size:12px;line-height:1.7">
+                <li v-for="(t, i) in (mtAct.result.attempts || [])" :key="'sc'+i"
+                    :style="t.ok ? 'color:#2f7a41' : (t.error === mtAct.result.baseline_msg ? 'color:#bbb' : 'color:#b45309')">{{ mtAttemptLine(t) }}</li>
+              </ul>
+            </details>
+
             <div v-if="mtAct.result.note" class="act-hint" style="margin-top:6px">{{ mtAct.result.note }}</div>
           </template>
         </div>
