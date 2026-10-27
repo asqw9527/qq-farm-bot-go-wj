@@ -45,6 +45,7 @@ type ThirdpartyConfig struct {
 type QQLoginAccountConfig struct {
 	NapcatBase string `json:"napcatBase"`
 	NapcatKey  string `json:"napcatKey"`
+	WebUIToken string `json:"webuiToken,omitempty"` // NapCat WebUI 令牌（需要重新扫码时用）
 	AppID      string `json:"appId"`
 	Ver        string `json:"ver"`
 }

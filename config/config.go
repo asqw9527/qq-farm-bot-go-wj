@@ -245,6 +245,7 @@ type QQLoginConfig struct {
 	Enabled    bool   `json:"enabled"`    // 是否在面板暴露「QQ 扫码登录」
 	NapcatBase string `json:"napcatBase"` // NapCat WebUI 地址，例如 http://127.0.0.1:6099
 	NapcatKey  string `json:"napcatKey"`  // qq-code 插件 key（data/config.json 的 key；留空=不鉴权）
+	WebUIToken string `json:"webuiToken"` // NapCat WebUI 登录令牌（webui.json 的 token，扫码登录用；留空=尝试免鉴权）
 	AppID      string `json:"appId"`      // QQ 经典农场小程序 appId，默认 1112386029
 	Ver        string `json:"ver"`        // 覆盖客户端版本号（探测新版本用），空=用系统版本
 	PluginPath string `json:"pluginPath"` // NapCat 插件路由名，默认 napcat-plugin-qq-farm-code
@@ -256,6 +257,7 @@ func DefaultQQLoginConfig() QQLoginConfig {
 		Enabled:    false,
 		NapcatBase: "",
 		NapcatKey:  "",
+		WebUIToken: "",
 		AppID:      "1112386029",
 		Ver:        "",
 		PluginPath: "napcat-plugin-qq-farm-code",

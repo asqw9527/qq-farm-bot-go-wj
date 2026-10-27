@@ -25,43 +25,65 @@ func registerQQLoginAPI(mux *http.ServeMux) {
 	mux.HandleFunc("/api/qq/login", handleQQLogin)
 	mux.HandleFunc("/api/qq/code", handleQQFetchCode)
 	mux.HandleFunc("/api/qq/config", handleQQConfig)
+	mux.HandleFunc("/api/qq/qr/start", handleQQQrStart)
+	mux.HandleFunc("/api/qq/qr/status", handleQQQrStatus)
+	mux.HandleFunc("/api/qq/qr/refresh", handleQQQrRefresh)
+	mux.HandleFunc("/api/qq/qr/cancel", handleQQQrCancel)
+}
+
+// qqCreds QQ 扫码登录凭据集合（请求体优先，回退系统配置）
+type qqCreds struct {
+	Base       string // NapCat WebUI/HTTP 地址
+	WebUIToken string // NapCat WebUI 令牌（webui.json 的 token，扫码登录用）
+	Key        string // qq-code 插件 key
+	AppID      string
+	Ver        string
+	PluginPath string
 }
 
 // resolveQQCreds 解析 NapCat 凭据：请求体优先，回退系统配置。
-func resolveQQCreds(body map[string]interface{}) (napcatBase, napcatKey, appId, ver, pluginPath string) {
+func resolveQQCreds(body map[string]interface{}) qqCreds {
 	cfg := models.GetQQLoginConfig()
+	c := qqCreds{
+		Base:       cfg.NapcatBase,
+		WebUIToken: cfg.WebUIToken,
+		Key:        cfg.NapcatKey,
+		AppID:      cfg.AppID,
+		Ver:        cfg.Ver,
+		PluginPath: cfg.PluginPath,
+	}
 	if v, ok := body["napcatBase"].(string); ok && strings.TrimSpace(v) != "" {
-		napcatBase = strings.TrimSpace(v)
-	} else {
-		napcatBase = cfg.NapcatBase
+		c.Base = strings.TrimSpace(v)
+	}
+	if v, ok := body["webuiToken"].(string); ok && strings.TrimSpace(v) != "" {
+		c.WebUIToken = strings.TrimSpace(v)
 	}
 	if v, ok := body["napcatKey"].(string); ok && strings.TrimSpace(v) != "" {
-		napcatKey = strings.TrimSpace(v)
-	} else {
-		napcatKey = cfg.NapcatKey
+		c.Key = strings.TrimSpace(v)
 	}
 	if v, ok := body["appId"].(string); ok && strings.TrimSpace(v) != "" {
-		appId = strings.TrimSpace(v)
-	} else if cfg.AppID != "" {
-		appId = cfg.AppID
-	} else {
-		appId = "1112386029"
+		c.AppID = strings.TrimSpace(v)
 	}
 	if v, ok := body["ver"].(string); ok && strings.TrimSpace(v) != "" {
-		ver = strings.TrimSpace(v)
-	} else {
-		ver = cfg.Ver
+		c.Ver = strings.TrimSpace(v)
 	}
-	pluginPath = cfg.PluginPath
-	if pluginPath == "" {
-		pluginPath = "napcat-plugin-qq-farm-code"
+	if c.AppID == "" {
+		c.AppID = "1112386029"
 	}
-	return
+	if c.PluginPath == "" {
+		c.PluginPath = "napcat-plugin-qq-farm-code"
+	}
+	return c
 }
 
 // fetchQQFarmCode 调 NapCat 插件 /proto/code 取 QQ 农场登录 code。
 // 返回协议：{ ok:true, uin, appid, code, raw } 或 { error:"..." }。
 func fetchQQFarmCode(napcatBase, napcatKey, appId, ver, pluginPath string) (code string, uin string, err error) {
+	return fetchQQFarmCodeTimeout(napcatBase, napcatKey, appId, ver, pluginPath, 30*time.Second)
+}
+
+// fetchQQFarmCodeTimeout 同上，超时可调（轮询场景用短超时防堆积）。
+func fetchQQFarmCodeTimeout(napcatBase, napcatKey, appId, ver, pluginPath string, timeout time.Duration) (code string, uin string, err error) {
 	if napcatBase == "" {
 		return "", "", fmt.Errorf("未配置 NapCat 地址（请到系统设置填写，或登录时传入 napcatBase）")
 	}
@@ -81,7 +103,7 @@ func fetchQQFarmCode(napcatBase, napcatKey, appId, ver, pluginPath string) (code
 	if napcatKey != "" {
 		req.Header.Set("x-napcat-farm-key", napcatKey)
 	}
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := &http.Client{Timeout: timeout}
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", "", fmt.Errorf("请求 NapCat 失败: %v", err)
@@ -132,13 +154,70 @@ func handleQQFetchCode(w http.ResponseWriter, r *http.Request) {
 	}
 	var body map[string]interface{}
 	json.NewDecoder(r.Body).Decode(&body)
-	napcatBase, napcatKey, appId, ver, pluginPath := resolveQQCreds(body)
-	code, uin, err := fetchQQFarmCode(napcatBase, napcatKey, appId, ver, pluginPath)
+	c := resolveQQCreds(body)
+	code, uin, err := fetchQQFarmCode(c.Base, c.Key, c.AppID, c.Ver, c.PluginPath)
 	if err != nil {
 		writeError(w, 400, err.Error())
 		return
 	}
-	writeJSON(w, map[string]interface{}{"ok": true, "data": map[string]interface{}{"code": code, "uin": uin, "appId": appId}})
+	writeJSON(w, map[string]interface{}{"ok": true, "data": map[string]interface{}{"code": code, "uin": uin, "appId": c.AppID}})
+}
+
+// createQQAccountAndConnect 用取到的 code 创建/复用 QQ 平台账号并连网关、挂自动化。
+// 返回账号 ID。供 /api/qq/login 与 QQ 扫码轮询成功后共用。
+func createQQAccountAndConnect(username, name string, c qqCreds, code, uin string) (string, error) {
+	if name == "" {
+		if uin != "" {
+			name = "QQ" + uin
+		} else {
+			name = "QQ账号"
+		}
+	}
+	if err := ensureAccountQuota(username); err != nil {
+		return "", err
+	}
+
+	qqLogin := &models.QQLoginAccountConfig{
+		NapcatBase: c.Base,
+		NapcatKey:  c.Key,
+		WebUIToken: c.WebUIToken,
+		AppID:      c.AppID,
+		Ver:        c.Ver,
+	}
+
+	// 去重：同一 UIN 的 QQ 账号重登复用已有记录（code 刷新即可）
+	acc := models.Account{
+		ID:        fmt.Sprintf("%d", time.Now().UnixNano()),
+		Name:      name,
+		Username:  username,
+		Code:      code,
+		Platform:  "qq",
+		QQ:        uin,
+		UIN:       uin,
+		Status:    "offline",
+		CreatedAt: time.Now().Format(time.RFC3339),
+		QQLogin:   qqLogin,
+	}
+	if uin != "" {
+		for _, a := range models.GetAccounts() {
+			if a.UIN == uin && a.Platform == "qq" {
+				acc = a
+				acc.Code = code
+				acc.Name = name
+				acc.Username = username
+				acc.QQLogin = qqLogin
+				acc.Thirdparty = nil // 切换到 NapCat 桥接，清掉第三方配置避免重连分支混乱
+				break
+			}
+		}
+	}
+
+	if _, err := models.AddOrUpdateAccount(acc); err != nil {
+		return "", fmt.Errorf("添加账号失败: %v", err)
+	}
+	models.SetActiveAccount(acc.ID)
+	startAutomationForAccount(acc.ID)
+	return acc.ID, nil
 }
 
 // handleQQLogin 取 code 并创建 qq 平台账号、建立网关连接。
@@ -150,79 +229,37 @@ func handleQQLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	var body map[string]interface{}
 	json.NewDecoder(r.Body).Decode(&body)
-	napcatBase, napcatKey, appId, ver, pluginPath := resolveQQCreds(body)
-	code, uin, err := fetchQQFarmCode(napcatBase, napcatKey, appId, ver, pluginPath)
+	c := resolveQQCreds(body)
+	code, uin, err := fetchQQFarmCode(c.Base, c.Key, c.AppID, c.Ver, c.PluginPath)
 	if err != nil {
 		writeError(w, 400, err.Error())
 		return
 	}
 
 	name, _ := body["name"].(string)
-	if name == "" {
-		if uin != "" {
-			name = "QQ" + uin
-		} else {
-			name = "QQ账号"
-		}
-	}
-
-	if err := ensureAccountQuota(u.Username); err != nil {
-		writeError(w, 403, err.Error())
-		return
-	}
-
-	qqLogin := &models.QQLoginAccountConfig{
-		NapcatBase: napcatBase,
-		NapcatKey:  napcatKey,
-		AppID:      appId,
-		Ver:        ver,
-	}
-
-	// 去重：同一 UIN 的 QQ 账号重登复用已有记录（code 刷新即可）
-	acc := models.Account{
-		ID:         fmt.Sprintf("%d", time.Now().UnixNano()),
-		Name:       name,
-		Username:   u.Username,
-		Code:       code,
-		Platform:   "qq",
-		QQ:         uin,
-		UIN:        uin,
-		Status:     "offline",
-		CreatedAt:  time.Now().Format(time.RFC3339),
-		QQLogin:    qqLogin,
-	}
-	if uin != "" {
-		for _, a := range models.GetAccounts() {
-			if a.UIN == uin && a.Platform == "qq" {
-				acc = a
-				acc.Code = code
-				acc.Name = name
-				acc.Username = u.Username
-				acc.QQLogin = qqLogin
-				acc.Thirdparty = nil // 切换到 NapCat 桥接，清掉第三方配置避免重连分支混乱
-				break
-			}
-		}
-	}
-
-	result, err := models.AddOrUpdateAccount(acc)
+	accID, err := createQQAccountAndConnect(u.Username, name, c, code, uin)
 	if err != nil {
-		writeError(w, 500, "添加账号失败: "+err.Error())
+		writeError(w, errCode(err), err.Error())
 		return
 	}
-	models.SetActiveAccount(acc.ID)
 	connected := false
-	if c, cerr := clientPool.Get(acc.ID); cerr == nil && c != nil && c.GID != 0 {
+	if cl, cerr := clientPool.Get(accID); cerr == nil && cl != nil && cl.GID != 0 {
 		connected = true
 	}
-	startAutomationForAccount(acc.ID)
 	writeJSON(w, map[string]interface{}{
-		"ok":            true,
-		"data":          result,
-		"activeAccountId": acc.ID,
-		"connected":     connected,
-		"uin":           uin,
+		"ok":              true,
+		"activeAccountId": accID,
+		"connected":       connected,
+		"uin":             uin,
 	})
+}
+
+// errCode 简单区分配额错误（403）与其它（500）
+func errCode(err error) int {
+	if strings.Contains(err.Error(), "配额") || strings.Contains(err.Error(), "上限") {
+		return 403
+	}
+	return 500
 }
 
 // handleQQConfig 读取/保存 QQ 扫码登录系统配置（NapCat 地址/key 等）。
@@ -230,14 +267,15 @@ func handleQQConfig(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case "GET":
 		cfg := models.GetQQLoginConfig()
-		// 脱敏：key 非空仅返回掩码
+		// 脱敏：key/webuiToken 非空仅返回掩码
 		out := map[string]interface{}{
-			"enabled":    cfg.Enabled,
-			"napcatBase": cfg.NapcatBase,
-			"appId":      cfg.AppID,
-			"ver":        cfg.Ver,
-			"pluginPath": cfg.PluginPath,
-			"hasKey":     cfg.NapcatKey != "",
+			"enabled":       cfg.Enabled,
+			"napcatBase":    cfg.NapcatBase,
+			"appId":         cfg.AppID,
+			"ver":           cfg.Ver,
+			"pluginPath":    cfg.PluginPath,
+			"hasKey":        cfg.NapcatKey != "",
+			"hasWebuiToken": cfg.WebUIToken != "",
 		}
 		writeJSON(w, map[string]interface{}{"ok": true, "data": out})
 	case "POST":
@@ -250,6 +288,7 @@ func handleQQConfig(w http.ResponseWriter, r *http.Request) {
 			Enabled    *bool  `json:"enabled"`
 			NapcatBase string `json:"napcatBase"`
 			NapcatKey  string `json:"napcatKey"`
+			WebUIToken string `json:"webuiToken"`
 			AppID      string `json:"appId"`
 			Ver        string `json:"ver"`
 			PluginPath string `json:"pluginPath"`
@@ -267,6 +306,9 @@ func handleQQConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		if body.NapcatKey != "" {
 			cfg.NapcatKey = strings.TrimSpace(body.NapcatKey)
+		}
+		if body.WebUIToken != "" {
+			cfg.WebUIToken = strings.TrimSpace(body.WebUIToken)
 		}
 		if body.AppID != "" {
 			cfg.AppID = strings.TrimSpace(body.AppID)

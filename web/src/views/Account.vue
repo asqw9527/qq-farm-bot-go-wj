@@ -77,9 +77,9 @@ const QR_CHS = [{ v: 'wx', l: '微信' }, { v: 'qq', l: 'QQ' }]
 function switchQrType(t) {
   if (qrType.value === t) return
   qrType.value = t
-  stopQr(); qrUrl.value = ''; qrMsg.value = ''
+  stopQr(); stopQqQr(); qrUrl.value = ''; qrMsg.value = ''
   if (t === 'wx') startQrLogin()
-  else loadQQConfig()
+  else { loadQQConfig(); qqStartQr() }
 }
 let qrTimer = null
 let qrSeq = 0
@@ -331,9 +331,11 @@ async function addByThirdpartyYyb() {
   } finally { t3rdBusy.value = false }
 }
 
-/* ---------- QQ 扫码登录（NapCat 桥接，参考 fubiwangluo/qq-code） ---------- */
-const qqNapcatBase = ref(''); const qqNapcatKey = ref(''); const qqAppId = ref('1112386029')
+/* ---------- QQ 扫码登录（NapCat 桥接：WebUI 二维码 + qq-code 插件取 code） ---------- */
+const qqNapcatBase = ref(''); const qqWebuiToken = ref(''); const qqNapcatKey = ref(''); const qqAppId = ref('1112386029')
 const qqVer = ref(''); const qqName = ref(''); const qqSaveDefault = ref(false); const qqBusy = ref(false); const qqMsg = ref('')
+const qqState = ref('') // '' | loading | qr | need_config | scanned | success | expired | error
+const qqQrImg = ref(''); const qqQrSession = ref(''); const showQqAdv = ref(false)
 async function loadQQConfig() {
   try {
     const { data } = await api.get('/api/qq/config')
@@ -344,49 +346,149 @@ async function loadQQConfig() {
     if (d.ver) qqVer.value = d.ver
   } catch (e) {}
 }
-async function qqLogin() {
+function _qqCredsPayload() {
+  return {
+    napcatBase: qqNapcatBase.value.trim(),
+    webuiToken: qqWebuiToken.value,
+    napcatKey: qqNapcatKey.value,
+    appId: qqAppId.value.trim() || '1112386029',
+    ver: qqVer.value.trim(),
+    name: qqName.value.trim(),
+  }
+}
+async function _qqSaveDefault() {
+  if (!qqSaveDefault.value) return
+  try {
+    await api.post('/api/qq/config', {
+      enabled: true,
+      napcatBase: qqNapcatBase.value.trim(),
+      napcatKey: qqNapcatKey.value,
+      webuiToken: qqWebuiToken.value,
+      appId: qqAppId.value.trim() || '1112386029',
+      ver: qqVer.value.trim(),
+    })
+  } catch (_) { /* 保存失败不影响本次登录 */ }
+}
+// 登录成功收尾：切当前账号、套用重连配置、刷新页面
+async function _qqFinish(d) {
+  qqState.value = 'success'
+  qqMsg.value = '登录成功，正在进入农场…'
+  stopQqQr(false)
+  const newId = d && d.activeAccountId
+  if (newId) {
+    setAccountId(newId)
+    try {
+      await api.post(`/api/reconnect/config?accountId=${encodeURIComponent(newId)}`, {
+        enabled: rcfg.enabled,
+        reconnectDelayMin: Math.max(1, Number(rcfg.delay) || 3),
+        reconnectMaxAttempts: Math.max(1, Number(rcfg.max) || 3),
+      })
+    } catch (_) { /* rc 配置失败不影响登录 */ }
+  }
+  setTimeout(() => { sheet.value = ''; app.success('QQ 扫码登录成功'); location.reload() }, 900)
+}
+let qqSeq = 0
+function stopQqQr(cancelRemote = true) {
+  qqSeq++
+  const sid = qqQrSession.value
+  qqQrSession.value = ''
+  if (sid && cancelRemote) { api.post('/api/qq/qr/cancel', { sessionId: sid }).catch(() => {}) }
+}
+// 开始 QQ 扫码：后端自动判断「已登录直接登录 / 需要扫码 / 需要配置」
+async function qqStartQr() {
+  stopQqQr()
+  qqMsg.value = ''; qqQrImg.value = ''
+  qqState.value = 'loading'
+  const seq = qqSeq
+  try {
+    const { data } = await api.post('/api/qq/qr/start', _qqCredsPayload(), { timeout: 60000 })
+    if (seq !== qqSeq) return
+    if (!(data?.ok && data?.data)) { qqState.value = 'error'; qqMsg.value = data?.error || '启动失败'; return }
+    const d = data.data
+    if (d.state === 'need_config') { qqState.value = 'need_config'; loadQQConfig(); return }
+    if (d.state === 'success') { await _qqFinish(d); return }
+    if (d.state === 'error') {
+      qqState.value = d.needConfig ? 'need_config' : 'error'
+      qqMsg.value = d.error || '未知错误'
+      return
+    }
+    if (d.state === 'qr') {
+      qqState.value = 'qr'
+      qqQrImg.value = d.qrImage || ''
+      qqQrSession.value = d.sessionId || ''
+      qqMsg.value = '请使用手机 QQ「扫一扫」扫描二维码'
+      _qqPoll()
+    }
+  } catch (e) {
+    qqState.value = 'error'
+    qqMsg.value = 'QQ 扫码启动失败: ' + _qrErr(e, '未知错误')
+  }
+}
+// 轮询扫码状态（后端在 NapCat 登录成功后自动建号连网关）
+async function _qqPoll() {
+  const seq = qqSeq
+  const sid = qqQrSession.value
+  if (!sid) return
+  const deadline = Date.now() + 180000
+  while (Date.now() < deadline) {
+    if (seq !== qqSeq) return
+    try {
+      const { data } = await api.get('/api/qq/qr/status', { params: { id: sid }, timeout: 30000 })
+      if (seq !== qqSeq) return
+      if (data?.ok && data?.state) {
+        const st = data.state
+        if (st === 'waiting') { qqState.value = 'qr'; if (data.qrImage) qqQrImg.value = data.qrImage }
+        else if (st === 'scanned') { qqState.value = 'scanned'; qqMsg.value = '已扫描，请在手机上确认登录…' }
+        else if (st === 'success') { await _qqFinish(data); return }
+        else if (st === 'expired') { qqState.value = 'expired'; qqMsg.value = '二维码已失效'; return }
+        else if (st === 'error') { qqState.value = 'error'; qqMsg.value = data.error || data.hint || '登录失败'; return }
+      }
+    } catch (e) {
+      if (e?.response?.status === 404) { qqState.value = 'error'; qqMsg.value = '会话已过期，请重新开始'; return }
+    }
+    await new Promise(r => setTimeout(r, 2000))
+  }
+  if (seq === qqSeq) { qqState.value = 'error'; qqMsg.value = '登录超时，请重新开始' }
+}
+// 刷新二维码（失效后）
+async function qqRefreshQr() {
+  const sid = qqQrSession.value
+  if (!sid) { qqStartQr(); return }
+  qqMsg.value = '正在刷新二维码…'
+  try {
+    const { data } = await api.post('/api/qq/qr/refresh', { sessionId: sid }, { timeout: 30000 })
+    if (data?.ok && data?.data?.qrImage) {
+      qqQrImg.value = data.data.qrImage; qqState.value = 'qr'
+      qqMsg.value = '二维码已刷新，请重新扫描'
+      _qqPoll()
+    } else { qqMsg.value = '刷新失败: ' + (data?.error || '未知') }
+  } catch (e) { qqMsg.value = '刷新失败: ' + _qrErr(e, '未知') }
+}
+// 保存配置（可选）并生成二维码
+async function qqSaveCfgAndStart() {
+  qqMsg.value = ''
+  if (!qqNapcatBase.value.trim()) { qqMsg.value = '请填写 NapCat 地址'; return }
+  await _qqSaveDefault()
+  qqStartQr()
+}
+// 直接登录（NapCat 已登录、跳过扫码）
+async function qqDirectLogin() {
   qqMsg.value = ''
   if (!qqNapcatBase.value.trim()) { qqMsg.value = '请填写 NapCat 地址'; return }
   qqBusy.value = true
   try {
-    // 可选：先把 NapCat 配置存为系统默认，下次免填
-    if (qqSaveDefault.value) {
-      try {
-        await api.post('/api/qq/config', {
-          enabled: true,
-          napcatBase: qqNapcatBase.value.trim(),
-          napcatKey: qqNapcatKey.value,
-          appId: qqAppId.value.trim() || '1112386029',
-          ver: qqVer.value.trim(),
-        })
-      } catch (_) { /* 保存失败不影响本次登录 */ }
-    }
-    const { data } = await api.post('/api/qq/login', {
-      napcatBase: qqNapcatBase.value.trim(),
-      napcatKey: qqNapcatKey.value,
-      appId: qqAppId.value.trim() || '1112386029',
-      ver: qqVer.value.trim(),
-      name: qqName.value.trim(),
-    }, { timeout: 60000 })
-    if (!(data && data.ok)) {
-      qqMsg.value = 'QQ 登录失败: ' + (data?.error || '未知')
-      qqBusy.value = false
-      return
-    }
-    app.success('QQ 扫码登录成功')
-    sheet.value = ''
-    location.reload()
+    const { data } = await api.post('/api/qq/login', _qqCredsPayload(), { timeout: 60000 })
+    if (!(data && data.ok)) { qqMsg.value = 'QQ 登录失败: ' + (data?.error || '未知'); return }
+    await _qqFinish(data)
   } catch (e) {
-    qqMsg.value = 'QQ 登录失败: ' + (e.response?.data?.error || e.message || '未知')
-  } finally {
-    qqBusy.value = false
-  }
+    qqMsg.value = 'QQ 登录失败: ' + _qrErr(e, '未知')
+  } finally { qqBusy.value = false }
 }
 
 // 切号事件：刷新账号列表（在线状态/active 标记随新账号变化）
 const onAccountSwitched = () => loadAccounts()
 onMounted(() => { loadAccounts(); window.addEventListener('account-switched', onAccountSwitched) })
-onUnmounted(() => { stopQr(); window.removeEventListener('account-switched', onAccountSwitched) })
+onUnmounted(() => { stopQr(); stopQqQr(); window.removeEventListener('account-switched', onAccountSwitched) })
 </script>
 
 <template>
@@ -495,7 +597,7 @@ onUnmounted(() => { stopQr(); window.removeEventListener('account-switched', onA
   </div>
 
   <!-- 扫码登录 sheet -->
-  <div v-if="sheet==='qr'" class="sheet-mask show" @click="sheet=''; stopQr()"></div>
+  <div v-if="sheet==='qr'" class="sheet-mask show" @click="sheet=''; stopQr(); stopQqQr()"></div>
   <div v-if="sheet==='qr'" class="sheet show">
     <div class="handle"></div>
     <h3>📱 扫码登录</h3>
@@ -516,28 +618,59 @@ onUnmounted(() => { stopQr(); window.removeEventListener('account-switched', onA
         </p>
       </template>
 
-      <!-- QQ 渠道：通过 NapCat + qq-code 插件取 QQ 农场 code（参考 fubiwangluo/qq-code） -->
+      <!-- QQ 渠道：NapCat WebUI 二维码 + qq-code 插件取 code（参考 fubiwangluo/qq-code） -->
       <template v-else>
-        <div style="width:100%;max-width:340px;display:flex;flex-direction:column;gap:8px">
-          <p style="font-size:12px;color:var(--muted);text-align:center;line-height:1.6;margin:0">
-            需先在 <b>NapCat</b> 登录目标 QQ（扫码一次即可），并安装启用 <b>napcat-plugin-qq-farm-code</b> 插件。
-          </p>
-          <input v-model="qqNapcatBase" class="field" placeholder="NapCat 地址，如 http://127.0.0.1:6099">
-          <input v-model="qqNapcatKey" class="field" placeholder="插件 Key（data/config.json 的 key，留空=不鉴权）" type="password" autocomplete="off">
-          <div style="display:flex;gap:8px">
-            <input v-model="qqAppId" class="field" placeholder="appId（默认 1112386029）" style="flex:2">
-            <input v-model="qqVer" class="field" placeholder="版本(可选)" style="flex:1.4">
+        <!-- 未配置 / 出错：显示配置表单 -->
+        <template v-if="qqState==='need_config' || qqState==='error'">
+          <div style="width:100%;max-width:340px;display:flex;flex-direction:column;gap:8px">
+            <p style="font-size:12px;color:var(--muted);text-align:center;line-height:1.6;margin:0">
+              需要一台已部署 <b>NapCat</b> 的设备（手机 QQ 扫码后在 NapCat 上授权登录），并安装启用 <b>napcat-plugin-qq-farm-code</b> 插件。
+            </p>
+            <input v-model="qqNapcatBase" class="field" placeholder="NapCat 地址，如 http://127.0.0.1:6099">
+            <input v-model="qqWebuiToken" class="field" placeholder="WebUI Token（NapCat webui.json 里的 token）" type="password" autocomplete="off">
+            <input v-model="qqNapcatKey" class="field" placeholder="插件 Key（可选，data/config.json 的 key）" type="password" autocomplete="off">
+            <template v-if="showQqAdv">
+              <div style="display:flex;gap:8px">
+                <input v-model="qqAppId" class="field" placeholder="appId（默认 1112386029）" style="flex:2">
+                <input v-model="qqVer" class="field" placeholder="版本(可选)" style="flex:1.4">
+              </div>
+              <input v-model="qqName" class="field" placeholder="备注名（可选，留空用 QQ 号）">
+            </template>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);cursor:pointer">
+              <input type="checkbox" v-model="qqSaveDefault"> 保存为默认（下次免填）
+            </label>
+            <p v-if="qqMsg" style="font-size:12px;color:var(--danger,#e5484d);text-align:center;margin:0;word-break:break-all">{{ qqMsg }}</p>
+            <button class="close" :disabled="qqBusy" style="margin-top:4px" @click="qqSaveCfgAndStart">{{ qqState==='loading' ? '连接中…' : '生成二维码' }}</button>
+            <button class="chip" style="align-self:center" @click="showQqAdv = !showQqAdv">{{ showQqAdv ? '收起高级选项' : '高级选项' }}</button>
+            <p style="font-size:11px;color:var(--muted);text-align:center;margin:0;line-height:1.6">
+              WebUI Token 在 NapCat 的 <code>webui.json</code> 或启动日志中查看。<br>
+              若 NapCat 已登录 QQ，点「生成二维码」后会跳过扫码直接登录。
+            </p>
           </div>
-          <input v-model="qqName" class="field" placeholder="备注名（可选，留空用 QQ 号）">
-          <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);cursor:pointer">
-            <input type="checkbox" v-model="qqSaveDefault"> 保存为默认（下次免填地址/Key）
-          </label>
-          <p v-if="qqMsg" style="font-size:12px;color:var(--danger,#e5484d);text-align:center;margin:0;word-break:break-all">{{ qqMsg }}</p>
-          <button class="close" :disabled="qqBusy" @click="qqLogin">{{ qqBusy ? '获取并登录中…' : '🐧 获取并登录' }}</button>
-          <p style="font-size:11px;color:var(--muted);text-align:center;margin:0;line-height:1.6">
-            原理：调 NapCat 插件 <code>/proto/code</code>，由 QQNT 内核 <code>loginWithAppId</code> 签出 QQ 农场 code，再用 platform=qq 连网关。被踢后用同一 NapCat 自动重签 code 重连。
+        </template>
+
+        <!-- 二维码展示 / 登录状态 -->
+        <template v-else>
+          <div style="position:relative;width:190px;height:190px;display:flex;align-items:center;justify-content:center;border-radius:14px;background:#fff;overflow:hidden;flex-shrink:0">
+            <img v-if="qqQrImg" :src="qqQrImg" alt="QQ 登录二维码" style="width:170px;height:170px;object-fit:contain">
+            <p v-else style="color:#888;font-size:12px;margin:0">{{ qqState==='loading' ? '连接 NapCat 中…' : '等待二维码…' }}</p>
+            <div v-if="qqState==='expired'" class="qr-overlay" @click="qqRefreshQr"><span>二维码已失效<br>点击刷新</span></div>
+            <div v-if="qqState==='success'" class="qr-overlay ok"><span style="font-size:30px">✓</span></div>
+          </div>
+          <p style="font-size:12px;color:var(--muted);margin:10px 0 0;text-align:center">
+            <template v-if="qqState==='loading'">正在连接 NapCat…</template>
+            <template v-else-if="qqState==='scanned'">已扫描，请在手机上确认登录…</template>
+            <template v-else-if="qqState==='success'">登录成功，正在进入农场…</template>
+            <template v-else-if="qqState==='expired'">二维码已失效，点击图片刷新</template>
+            <template v-else>请使用手机 QQ「扫一扫」扫描二维码</template>
           </p>
-        </div>
+          <p v-if="qqState==='error' && qqMsg" style="font-size:12px;color:var(--danger,#e5484d);margin:6px 0 0;text-align:center;max-width:320px;word-break:break-all">{{ qqMsg }}</p>
+          <button v-if="qqState==='expired'" class="close" style="margin-top:8px" @click="qqRefreshQr">刷新二维码</button>
+          <p style="font-size:11px;color:var(--muted);margin-top:8px;text-align:center;max-width:300px;line-height:1.6">
+            扫码将在 NapCat 上授权登录该 QQ，登录后自动通过 <code>loginWithAppId</code> 签出农场 code 并加入账号列表；被踢后自动重签重连。<br>
+            若 NapCat 已登录目标 QQ，可 <span class="link" style="cursor:pointer" @click="qqDirectLogin">直接登录（跳过扫码）</span>
+          </p>
+        </template>
       </template>
     </div>
 
@@ -574,7 +707,7 @@ onUnmounted(() => { stopQr(); window.removeEventListener('account-switched', onA
     </div>
 
     <button class="close" v-if="!qrBusy && qrType==='wx'" style="margin-top:4px" @click="startQrLogin">重新获取二维码</button>
-    <button class="close" style="margin-top:8px" @click="sheet=''; stopQr()">关闭</button>
+    <button class="close" style="margin-top:8px" @click="sheet=''; stopQr(); stopQqQr()">关闭</button>
   </div>
 
   <!-- 第三方应用宝登录 sheet（与内置 YYB 互不冲突；自带账号级独立重连配置） -->
@@ -628,4 +761,10 @@ onUnmounted(() => { stopQr(); window.removeEventListener('account-switched', onA
 }
 .bi-use:active, .bi-sell:active { transform: scale(.95); }
 .bi-sell { color: var(--danger, #e5484d); border-color: color-mix(in oklch, var(--danger, #e5484d) 40%, transparent); }
+.qr-overlay {
+  position: absolute; inset: 0; background: rgba(255, 255, 255, .94);
+  display: flex; align-items: center; justify-content: center; text-align: center;
+  font-size: 13px; color: var(--danger, #e5484d); cursor: pointer; line-height: 1.7; z-index: 1;
+}
+.qr-overlay.ok { color: #2e9e5b; cursor: default; font-size: 13px; }
 </style>
