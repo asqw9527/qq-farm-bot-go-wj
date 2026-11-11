@@ -133,7 +133,8 @@ func DefaultAccountConfig() AccountConfig {
 			FertilizerLandTypes:     []string{"purple", "gold", "black", "red", "normal"},
 		},
 		AutoCodeRefresh: AutoCodeRefreshConfig{
-			Enabled:         false,
+			// 默认开启：定时保活微信 LoginBuffer / refresh token，避免掉线后必须重新扫码。
+			Enabled:         true,
 			IntervalMinutes: 60,
 		},
 		AutoReconnect: AutoReconnectConfig{
@@ -192,7 +193,7 @@ type GlobalConfig struct {
 	SystemConfig            SystemConfig             `json:"systemConfig"`
 	CaptureConfig           CaptureConfig            `json:"captureConfig"`
 	GlobalWxConfig          GlobalWxConfig           `json:"globalWxConfig"`
-	QQLoginConfig           QQLoginConfig           `json:"qqLoginConfig"`
+	QQLoginConfig           QQLoginConfig            `json:"qqLoginConfig"`
 	DeviceProtocol          DeviceProtocol           `json:"deviceProtocol"`
 	ActiveAccountID         string                   `json:"activeAccountId"`
 }

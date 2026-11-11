@@ -194,10 +194,12 @@ async function startQrLogin() {
 /* ---------- 掉线自动重连（扫码弹窗内 rc-panel） ---------- */
 const rcfg = reactive({ enabled: true, delay: 3, max: 3 })
 const rcState = ref('连接：-')
+const needRescan = ref(false)
 function _fmtRc(st) {
   const s = (st && st.state) || '-'
   let t = '连接：' + s
   if (st && st.stopped) t += '（已停止）'
+  if (st && st.needRescan) t += ' · 需重新扫码'
   if (st && st.attempts) t += ' · 已重连' + st.attempts + '次'
   return t
 }
@@ -209,7 +211,10 @@ async function loadRc(accountId) {
     rcfg.enabled = !!d.enabled
     if (d.reconnectDelayMin !== undefined) rcfg.delay = d.reconnectDelayMin
     if (d.reconnectMaxAttempts !== undefined) rcfg.max = d.reconnectMaxAttempts
-    if (d.state) rcState.value = _fmtRc(d.state)
+    if (d.state) {
+      rcState.value = _fmtRc(d.state)
+      needRescan.value = !!d.state.needRescan
+    }
   } catch (e) {}
 }
 async function saveRc(accountId) {
@@ -542,6 +547,10 @@ onUnmounted(() => { stopQr(); stopQqQr(); window.removeEventListener('account-sw
           <!-- 掉线自动重连（账号级，登录后也可改） -->
           <div class="rc-panel" style="margin-top:10px">
             <div class="rc-head">📡 掉线自动重连 <small>该账号断线后延迟换 code 自动重连</small></div>
+          <div v-if="needRescan" class="rc-row" style="color:#a32d2d;font-size:12px">
+            微信登录凭据已过期，自动重连已停止，请重新扫码登录。
+            <button class="chip" style="margin-left:6px" @click="sheet='qr'; loadRc(editing.id); loadQQConfig(); qrType='wx'; startQrLogin()">📱 重新扫码</button>
+          </div>
             <div class="rc-row">
               <span>开启自动重连</span>
               <div class="switch" :class="{ on: rcfg.enabled }" @click="rcfg.enabled = !rcfg.enabled"></div>
@@ -684,6 +693,7 @@ onUnmounted(() => { stopQr(); stopQqQr(); window.removeEventListener('account-sw
     <!-- 掉线自动重连 -->
     <div class="rc-panel" style="margin-top:14px">
       <div class="rc-head">📡 掉线自动重连 <small>断线后延迟换 code 自动重连</small></div>
+      <div v-if="needRescan" style="color:#a32d2d;font-size:12px;margin-top:6px">微信登录凭据已过期，请用手机微信扫描上方二维码重新登录。</div>
       <div class="rc-row">
         <span>开启自动重连</span>
         <div class="switch" :class="{ on: rcfg.enabled }" @click="rcfg.enabled = !rcfg.enabled"></div>

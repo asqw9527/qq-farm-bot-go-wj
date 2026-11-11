@@ -222,6 +222,8 @@ func handleAccounts(w http.ResponseWriter, r *http.Request) {
 			writeError(w, 500, "添加账号失败: "+err.Error())
 			return
 		}
+		// 重新扫码（同一 openid 复用账号）后清除「需重新扫码」标记，恢复自动重连。
+		clientPool.clearNeedRescan(acc.ID)
 		// 默认把最新添加的账号设为当前活跃账号，便于立即查看真实数据
 		models.SetActiveAccount(acc.ID)
 		// 同步连接网关，连好再返回，前端添加后刷新即有数据
@@ -493,7 +495,9 @@ func getCodeFromYyb(apiBase, apiKey, openid, appID string) (string, error) {
 		"app_id": appID,
 	})
 	if err != nil {
-		return "", err
+		// 409「re-scan required」是凭据过期，不是普通换 code 失败：单独标记，
+		// 让上层停止无效重试并提示用户重新扫码。
+		return "", wrapWxCredentialError(err)
 	}
 	innerData, _ := result["data"].(map[string]interface{})
 	if innerData != nil {
@@ -504,6 +508,29 @@ func getCodeFromYyb(apiBase, apiKey, openid, appID string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("应用宝接口未返回 code")
+}
+
+// refreshYybAccountCredentials 主动调用内置应用宝 /accounts/refresh 刷新
+// LoginBuffer 与 refresh token。凭据保活循环使用它，避免 token 长期不用而失效。
+func refreshYybAccountCredentials(apiBase, apiKey, openid string) error {
+	if apiBase == "" || apiKey == "" {
+		return fmt.Errorf("应用宝接口地址或 API Token 未配置")
+	}
+	result, err := callYybAPI(apiBase, "/accounts/refresh", apiKey, "POST", map[string]interface{}{
+		"ref": openid,
+	})
+	if err != nil {
+		return wrapWxCredentialError(err)
+	}
+	data, _ := result["data"].(map[string]interface{})
+	if data == nil {
+		return fmt.Errorf("应用宝刷新接口未返回账号状态")
+	}
+	status, _ := data["status"].(string)
+	if status != "alive" {
+		return fmt.Errorf("%w: 应用宝账号状态 %s", errWxCredentialExpired, status)
+	}
+	return nil
 }
 
 func handleYybThirdpartyCode(w http.ResponseWriter, r *http.Request) {

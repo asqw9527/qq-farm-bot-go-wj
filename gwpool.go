@@ -27,6 +27,7 @@ type ClientPool struct {
 	reconnectAttempts map[string]int       // 重连计数
 	stopped           map[string]bool      // 达上限后停止自动重连，直到手动触发/重新连上
 	kickBackoffUntil  map[string]time.Time // 被踢后重连防抖：下次允许重连的最早时间（避免与别处登录互踢自旋）
+	needRescan        map[string]string    // 微信登录凭据已过期，需重新扫码（accountID -> 原因）；非空时禁止一切自动/手动重连
 	transientClose    map[string]bool      // 最近一次断连为“超时型”（服务端抖动/瞬时限流）：此类重连不计入 reconnectMaxAttempts 上限
 }
 
@@ -44,6 +45,7 @@ var clientPool = &ClientPool{
 	stopped:           map[string]bool{},
 	kickBackoffUntil:  map[string]time.Time{},
 	transientClose:    map[string]bool{},
+	needRescan:        map[string]string{},
 }
 
 func gwConfig(platform string) gw.Config {
@@ -92,6 +94,10 @@ func (p *ClientPool) store(accountID string, c *gw.Client) {
 // ReconnectDelayMin 延迟调度（避免被踢后秒级重连、与别处登录互踢自旋）；
 // 自动重连关闭时维持原行为：用 YYB openid 刷新 code 立即重连。
 func (p *ClientPool) onKick(accountID string) {
+	// 凭据已过期：被踢后不再触发任何懒重连，等用户重新扫码。
+	if reason := p.needRescanReason(accountID); reason != "" {
+		return
+	}
 	// 被踢下线日志
 	appendOpLog(accountID, "掉线", "账号在别处登录被踢下线")
 	notifyOffline(accountID, "账号在别处登录被踢下线")
@@ -244,6 +250,16 @@ func refreshCodeForAccount(acc *models.Account) (string, error) {
 // 避免多连接并发登录触发游戏“账号已在其他地方登录”自踢死循环。
 // 连接失败且 code 疑似过期时，用 openid 自动刷新一次后重试。
 func (p *ClientPool) connectLocked(acc *models.Account) (*gw.Client, error) {
+	return p.connectLockedInternal(acc, true)
+}
+
+// connectLockedNoCodeRefresh 供自动重连使用：调用方已换过 code，跳过内部二次刷新，
+// 避免一轮重连对应用宝发起两次 getCode（并发刷新会加速 refresh token 轮换失效）。
+func (p *ClientPool) connectLockedNoCodeRefresh(acc *models.Account) (*gw.Client, error) {
+	return p.connectLockedInternal(acc, false)
+}
+
+func (p *ClientPool) connectLockedInternal(acc *models.Account, refreshOnFailure bool) (*gw.Client, error) {
 	p.mu.Lock()
 	if ch, ok := p.inflight[acc.ID]; ok {
 		// 已有连接在进行中，挂等其结果（不新建第二个连接）
@@ -256,7 +272,7 @@ func (p *ClientPool) connectLocked(acc *models.Account) (*gw.Client, error) {
 	p.mu.Unlock()
 
 	c, err := connect(acc)
-	if err != nil && !gw.IsBanError(err) {
+	if err != nil && refreshOnFailure && !gw.IsBanError(err) {
 		// code 过期 → 按账号类型自动换 code 重试一次（封号 1000016 直接放弃，不再无效重试）
 		if newCode, cerr := refreshCodeForAccount(acc); cerr == nil && newCode != "" {
 			acc.Code = newCode
@@ -337,6 +353,13 @@ func (p *ClientPool) get(accountID string, force bool) (*gw.Client, error) {
 		return nil, fmt.Errorf("账号 %s 未配置登录 code", accountID)
 	}
 
+	if force {
+		// 手动更新 code / 重新扫码走主动路径，允许解除凭据过期标记。
+		p.clearNeedRescan(accountID)
+	} else if reason := p.needRescanReason(accountID); reason != "" {
+		return nil, fmt.Errorf("%s（%s）", wxRescanHint, reason)
+	}
+
 	if !force {
 		cfg := models.GetAutoReconnect(accountID)
 		if cfg.Enabled && cfg.ReconnectDelayMin > 0 {
@@ -403,6 +426,7 @@ func (p *ClientPool) evict(accountID string) {
 	delete(p.reconnectAttempts, accountID)
 	delete(p.stopped, accountID)
 	delete(p.kickBackoffUntil, accountID)
+	delete(p.needRescan, accountID)
 	p.mu.Unlock()
 }
 

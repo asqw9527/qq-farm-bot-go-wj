@@ -120,8 +120,15 @@ func main() {
 		log.Printf("[yyb] embedded yyb service listening at %s", base)
 	}
 
+	// 后台循环统一使用可取消 ctx，优雅退出时一并停止。
+	appCtx, cancelAppCtx := context.WithCancel(context.Background())
+	defer cancelAppCtx()
+
 	// 启动后台掉线自动重连扫描（增强：不破坏现有懒重连，Get() 仍可用）
-	clientPool.StartAutoReconnect(context.Background())
+	clientPool.StartAutoReconnect(appCtx)
+
+	// 微信登录凭据定时保活：刷新 LoginBuffer / refresh token，避免掉线后必须重新扫码。
+	startWxCredentialKeepalive(appCtx)
 
 	// 启动神秘商人自动购买
 	startMysteryAutoBuyLoop(context.Background())

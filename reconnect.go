@@ -54,6 +54,10 @@ func (p *ClientPool) scanAutoReconnect() {
 		if c == nil {
 			continue
 		}
+		// 凭据已过期：换 code 不可能成功，停止空转，等用户重新扫码。
+		if p.needRescan[id] != "" {
+			continue
+		}
 		cfg := models.GetAutoReconnect(id)
 		if !cfg.Enabled || cfg.ReconnectDelayMin <= 0 {
 			continue
@@ -128,19 +132,29 @@ func (p *ClientPool) reconnectAccount(accountID string) {
 		return
 	}
 
-	// 换 code（走内置 YYB）；失败用旧 code 继续（不改 code）
-	newCode, cerr := refreshCodeFromYyb(acc)
-	if cerr == nil && newCode != "" {
+	// 换 code：按账号类型（内置 YYB / 第三方 / NapCat）走统一入口，避免 QQ 账号误用 openid。
+	newCode, cerr := refreshCodeForAccount(acc)
+	if cerr != nil {
+		// 凭据过期：换 code 不可能成功，直接标记并停止无效重试，引导重新扫码。
+		if isWxCredentialExpired(cerr) {
+			p.markNeedRescan(accountID, cerr.Error())
+			return
+		}
+		log.Printf("[reconnect] 账号 %s 换 code 失败（将用旧 code 尝试）: %v", accountID, cerr)
+	} else if newCode != "" {
 		acc.Code = newCode
 		models.AddOrUpdateAccount(*acc)
-	} else {
-		log.Printf("[reconnect] 账号 %s 换 code 失败（将用旧 code 尝试）: %v", accountID, cerr)
 	}
 
-	// 单飞连接：同一账号同时只连一个，避免与前端 Get / onKick 并发登录造成自踢
+	// 单飞连接：同一账号同时只连一个，避免与前端 Get / onKick 并发登录造成自踢。
+	// 本轮已换过 code，关闭 connectLocked 内部的二次刷新，避免一轮重连打两次换 code。
 	appendOpLog(accountID, "重连", "正在自动重连...")
-	_, err := p.connectLocked(acc)
+	_, err := p.connectLockedNoCodeRefresh(acc)
 	if err != nil {
+		if isWxCredentialExpired(err) {
+			p.markNeedRescan(accountID, err.Error())
+			return
+		}
 		// 封号（权限不足 code=1000016）：永久关闭该号自动重连，避免反复打无效登录。
 		if gw.IsBanError(err) {
 			p.disableAutoReconnectForBan(accountID)
@@ -166,6 +180,10 @@ func (p *ClientPool) reconnectAccount(accountID string) {
 
 // TryReconnectNow 手动触发立即重连（重置计数与停止态后执行，视为重新开始）
 func (p *ClientPool) TryReconnectNow(accountID string) {
+	if reason := p.needRescanReason(accountID); reason != "" {
+		log.Printf("[reconnect] 账号 %s 需重新扫码，跳过手动重连: %s", accountID, reason)
+		return
+	}
 	cfg := models.GetAutoReconnect(accountID)
 	if !cfg.Enabled {
 		log.Printf("[reconnect] 账号 %s 自动重连未开启，跳过手动重连", accountID)
@@ -200,7 +218,9 @@ func (p *ClientPool) disableAutoReconnectForBan(accountID string) {
 	appendOpLog(accountID, "重连", "账号已被封禁(1000016)，已永久关闭自动重连")
 }
 
-// resetAutoReconnect 清零某账号的断线/重连计数/停止标记（手动触发或踢下线/删除调用）
+// resetAutoReconnect 清零某账号的断线/重连计数/停止标记（手动触发或踢下线/删除调用）。
+// 注意：不清 needRescan ——「凭据过期」只能由重新扫码/手动更新 code 解除，
+// 否则点一次「立即重连」就会绕过标记继续打无效登录。
 func (p *ClientPool) resetAutoReconnect(accountID string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -222,9 +242,10 @@ func (p *ClientPool) reconnectStatus(accountID string) map[string]interface{} {
 		}
 	}
 	st := map[string]interface{}{
-		"state":    state,
-		"stopped":  p.stopped[accountID],
-		"attempts": p.reconnectAttempts[accountID],
+		"state":      state,
+		"stopped":    p.stopped[accountID],
+		"attempts":   p.reconnectAttempts[accountID],
+		"needRescan": p.needRescan[accountID] != "",
 	}
 	if since, ok := p.offlineSince[accountID]; ok {
 		st["offlineSince"] = since.Format(time.RFC3339)
@@ -315,6 +336,10 @@ func handleReconnectRetry(w http.ResponseWriter, r *http.Request) {
 	accountID := resolveAccountIDWithOwner(r, r.URL.Query().Get("accountId"))
 	if accountID == "" {
 		writeError(w, 400, "没有可用账号")
+		return
+	}
+	if reason := clientPool.needRescanReason(accountID); reason != "" {
+		writeError(w, 409, wxRescanHint+"（"+reason+"）")
 		return
 	}
 	clientPool.resetAutoReconnect(accountID)
