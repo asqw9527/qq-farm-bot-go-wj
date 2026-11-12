@@ -1192,25 +1192,27 @@ func autoPlantLands(accountID string, c *gw.Client, cfg config.AccountConfig, la
 				prefMasters = append(prefMasters, u.master)
 			}
 		}
-		remaining, fallbackAllowed, bagPlanted, e := plantBagSeedsForLands(accountID, c, cfg, prefMasters)
+		remaining, bagPlanted, bagErr := plantBagSeedsForLands(accountID, c, cfg, prefMasters)
 		summary.Count1x1 += bagPlanted
 		summary.TotalLands += bagPlanted
-		if e != nil {
-			appendOpLog(accountID, "farm", "背包种子读取失败，跳过本轮: "+e.Error())
-			return summary
+		if bagErr != nil {
+			// 读背包失败不再整轮退出：plantBagSeedsForLands 已把全部地块作为 remaining 返回，
+			// 交给第二优先策略从商城补种，避免一次 Bag 超时导致整片地空着。
+			appendOpLog(accountID, "farm", "背包种子读取失败，改由第二优先策略补种: "+bagErr.Error())
 		}
 		fallbackLands := append([]int64{}, otherMasters...)
-		if fallbackAllowed {
-			fallbackLands = append(fallbackLands, remaining...)
-		}
+		fallbackLands = append(fallbackLands, remaining...)
+		fallbackLands = dedupeInt64(fallbackLands)
 		if len(fallbackLands) > 0 {
 			fb := cfg.BagSeedFallbackStrategy
 			if fb == "" {
 				fb = "level"
 			}
+			appendOpLog(accountID, "farm", fmt.Sprintf("背包种子已种 %d 块，剩余 %d 块交第二策略(%s)", bagPlanted, len(fallbackLands), fb))
 			shopPlanted := plantFromShopLands(accountID, c, cfg, fallbackLands, fb)
 			summary.Count1x1 += shopPlanted
 			summary.TotalLands += shopPlanted
+			appendOpLog(accountID, "farm", fmt.Sprintf("第二策略补种 %d 块", shopPlanted))
 		}
 		return summary
 	}
@@ -1670,19 +1672,19 @@ func listBagSeeds(accountID string, c *gw.Client, cfg config.AccountConfig, size
 }
 
 // plantBagSeedsForLands 用背包 1x1 种子按优先级顺序种植。
-// 每种背包种子按其数量消耗；返回未被背包种子覆盖的剩余空地主地 ID，以及是否允许用第二优先策略补种
-// （某背包种子部分种植失败时 fallbackAllowed=false，避免误购商城种子）。
-func plantBagSeedsForLands(accountID string, c *gw.Client, cfg config.AccountConfig, masters []int64) (remaining []int64, fallbackAllowed bool, plantedCount int, err error) {
-	fallbackAllowed = true
+// 每颗种子独立处理：种不下去只跳过该种子，剩余空地一律返回给上层，
+// 由第二优先策略从商城补种（不再有整轮级的 fallbackAllowed 开关）。
+// Bag 读取失败时同样返回全部地块，由上层兜底，不再整轮跳过。
+func plantBagSeedsForLands(accountID string, c *gw.Client, cfg config.AccountConfig, masters []int64) (remaining []int64, plantedCount int, err error) {
 	if len(masters) == 0 {
-		return nil, true, 0, nil
+		return nil, 0, nil
 	}
 	seeds, err := listBagSeeds(accountID, c, cfg, 1)
 	if err != nil {
-		return masters, false, 0, err
+		return masters, 0, err
 	}
 	if len(seeds) == 0 {
-		return masters, true, 0, nil
+		return masters, 0, nil
 	}
 	reserved := reservedLandSet(accountID)
 	remainingSet := map[int64]bool{}
@@ -1704,23 +1706,17 @@ func plantBagSeedsForLands(accountID string, c *gw.Client, cfg config.AccountCon
 			continue
 		}
 		planted := 0
-		// 背包等级锁定种子（reqLvl>当前等级）尝试失败不应阻断第二策略补种
-		levelLocked := int64(s.reqLvl) > c.Level()
 		for m := range remainingSet {
 			if planted >= int(maxCount) {
 				break
 			}
-			realSeed, e := ensureSeedOwned(c, s.seedID, 0, 0, 1)
-			if e != nil || realSeed <= 0 {
-				if !levelLocked {
-					fallbackAllowed = false
-				}
+			realSeed, e := ensureBagSeedOwned(c, s.seedID, 1)
+			if e != nil {
+				appendOpLog(accountID, "farm", fmt.Sprintf("背包种子 %d 不可用，跳过该种子: %v", s.seedID, e))
 				break
 			}
 			if e2 := execFarmOp(c, "Plant", proto.EncodePlantRequest(realSeed, []int64{m})); e2 != nil {
-				if !levelLocked {
-					fallbackAllowed = false
-				}
+				appendOpLog(accountID, "farm", fmt.Sprintf("背包种子 %d 种植失败，跳过该种子: %v", realSeed, e2))
 				break
 			}
 			delete(remainingSet, m)
@@ -1730,17 +1726,32 @@ func plantBagSeedsForLands(accountID string, c *gw.Client, cfg config.AccountCon
 			appendOpLog(accountID, "farm", fmt.Sprintf("背包种植种子 %d → 1 块地", realSeed))
 			time.Sleep(plantDelay(cfg) + 200*time.Millisecond)
 		}
-		// 实际种植数少于请求数 → 部分失败，避免误购商城
-		// 等级锁定种子整批无法种植（planted==0）时不阻断 fallback
-		if planted < int(maxCount) && len(remainingSet) > 0 && (!levelLocked || planted > 0) {
-			fallbackAllowed = false
-			break
-		}
 	}
 	for m := range remainingSet {
 		remaining = append(remaining, m)
 	}
-	return remaining, fallbackAllowed, plantedCount, nil
+	return remaining, plantedCount, nil
+}
+
+// ensureBagSeedOwned 只检查背包库存，不触发商城购买。
+// 背包种子优先策略里，商城补种属于第二优先策略的职责；活动/绝版种子在商城无货时
+// 直接跳过该种子即可，不应误购，也不应把整轮回退关掉。
+func ensureBagSeedOwned(c *gw.Client, seedID int64, need int) (int64, error) {
+	rep, err := c.Request(context.Background(), "gamepb.itempb.ItemService", "Bag",
+		proto.EncodeBagRequest(), 12*time.Second)
+	if err != nil {
+		return 0, err
+	}
+	have := int64(0)
+	for _, it := range proto.DecodeBagReply(rep.Body).Items {
+		if it.ID == seedID {
+			have += it.Count
+		}
+	}
+	if have < int64(need) {
+		return 0, fmt.Errorf("背包库存不足（需要 %d，实有 %d）", need, have)
+	}
+	return seedID, nil
 }
 
 // plantFromShopLands 对给定主地列表按策略从商城选种购买并种植，返回成功种植的单地数。
